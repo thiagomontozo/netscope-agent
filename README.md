@@ -238,12 +238,15 @@ use `--privileged` as the default.
 ## Limitations
 
 v0.1 is experimental, has no automatic update, live packet capture, live Zeek or
-Suricata mode, dynamic plugins, advanced process sandbox, or tests. External tool
-normalization is intentionally conservative and availability varies by OS.
+Suricata mode, dynamic plugins, advanced process sandbox, or broad automated test
+coverage. External tool normalization is intentionally conservative and
+availability varies by OS. CI validates source quality, supported platform builds
+and the container without executing diagnostics; see
+[Continuous Integration](docs/continuous-integration.md).
 
 ## Roadmap
 
-v0.2: automated tests, CI, improved OS adapters, live Zeek sensor support,
+v0.2: expanded automated tests, improved OS adapters, live Zeek sensor support,
 Suricata live events, S3 artifact streaming, and stronger resource isolation.
 
 v0.3: NATS JetStream transport, signed remote upgrades with checksum/rollback and
