@@ -5,46 +5,44 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/thiagomontozo/netscope-agent/internal/client"
 	"github.com/thiagomontozo/netscope-agent/internal/identity"
+	"github.com/thiagomontozo/netscope-agent/internal/protocol"
 )
 
-func Ensure(ctx context.Context, dataDir, name, token, version string, api *client.Client) (*identity.Identity, error) {
+func Ensure(ctx context.Context, dataDir, name, token, version, networkZone string, capabilitySummary []string, api *client.Client) (*identity.Identity, bool, error) {
 	id, err := identity.Load(dataDir)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if id != nil {
-		return id, nil
+		return id, false, nil
 	}
-	if strings.TrimSpace(token) == "" {
-		return nil, errors.New("first enrollment requires NETSCOPE_ENROLLMENT_TOKEN")
+	if len(strings.TrimSpace(token)) < 32 {
+		return nil, false, errors.New("first enrollment requires a valid NETSCOPE_ENROLLMENT_TOKEN")
 	}
-	id, err = identity.Generate()
+	hostname, err := os.Hostname()
+	if err != nil || hostname == "" {
+		return nil, false, errors.New("hostname is required for enrollment")
+	}
+	pending, err := identity.Generate(name, hostname)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	resp, err := api.Enroll(ctx, token, client.EnrollRequest{Name: name, PublicKey: id.PublicKey, OS: runtime.GOOS, Architecture: runtime.GOARCH, Version: version})
+	sort.Strings(capabilitySummary)
+	request := protocol.EnrollmentRequest{ProtocolVersion: protocol.Version, EnrollmentToken: token, AgentName: name, Hostname: hostname, OS: runtime.GOOS, Architecture: runtime.GOARCH, AgentVersion: version, PublicIdentity: protocol.PublicIdentity{CSRPEM: pending.CSRPEM}, CapabilitiesSummary: capabilitySummary, NetworkZone: networkZone}
+	response, err := api.Enroll(ctx, request)
 	if err != nil {
-		return nil, fmt.Errorf("enrollment failed: %w", err)
+		return nil, false, fmt.Errorf("enrollment failed: %w", err)
 	}
-	if resp.AgentID == "" || resp.Credential == "" {
-		return nil, errors.New("enrollment response omitted permanent identity fields")
+	id, err = identity.SaveEnrollment(dataDir, pending, response)
+	if err != nil {
+		return nil, false, err
 	}
-	id.AgentID = resp.AgentID
-	id.Credential = resp.Credential
-	if err := identity.Save(dataDir, id); err != nil {
-		return nil, err
-	}
-	if resp.ControlPlaneSigningKey != "" {
-		p := filepath.Join(dataDir, "identity", "control-plane-signing-key")
-		if err := os.WriteFile(p, []byte(resp.ControlPlaneSigningKey+"\n"), 0o600); err != nil {
-			return nil, err
-		}
-	}
-	return id, nil
+	_ = os.Unsetenv("NETSCOPE_ENROLLMENT_TOKEN")
+	return id, true, nil
 }

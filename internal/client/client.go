@@ -13,37 +13,55 @@ import (
 	"strings"
 	"time"
 
-	"github.com/thiagomontozo/netscope-agent/internal/identity"
-	"github.com/thiagomontozo/netscope-agent/internal/jobs"
+	"github.com/thiagomontozo/netscope-agent/internal/protocol"
 )
 
 const maxResponseBytes int64 = 4 << 20
 
-type Client struct {
-	base     *url.URL
-	http     *http.Client
-	version  string
-	identity *identity.Identity
+type APIError struct {
+	StatusCode int
+	Code       string
+	Message    string
+	RequestID  string
 }
 
-func New(rawURL string, h *http.Client, version string, id *identity.Identity) (*Client, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return nil, err
+func (e *APIError) Error() string {
+	if e.Code != "" {
+		return fmt.Sprintf("control plane %s (HTTP %d, request %s)", e.Code, e.StatusCode, e.RequestID)
 	}
-	return &Client{base: u, http: h, version: version, identity: id}, nil
+	return fmt.Sprintf("control plane returned HTTP %d", e.StatusCode)
 }
+
+func IsTerminal(err error) bool {
+	var api *APIError
+	return errors.As(err, &api) && (api.Code == "AGENT_REVOKED" || api.Code == "PROTOCOL_INCOMPATIBLE")
+}
+
+type Client struct {
+	base    *url.URL
+	http    *http.Client
+	version string
+}
+
+func New(rawURL string, h *http.Client, version string) (*Client, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return nil, errors.New("control plane URL must be absolute HTTPS")
+	}
+	return &Client{base: u, http: h, version: version}, nil
+}
+
 func (c *Client) CloseIdleConnections()       { c.http.CloseIdleConnections() }
 func (c *Client) endpoint(path string) string { return strings.TrimRight(c.base.String(), "/") + path }
 
-func (c *Client) doJSON(ctx context.Context, method, path string, in, out any, enrollmentToken string) error {
+func (c *Client) doJSON(ctx context.Context, method, path string, in, out any) error {
 	var body io.Reader
 	if in != nil {
-		b, err := json.Marshal(in)
+		encoded, err := json.Marshal(in)
 		if err != nil {
 			return err
 		}
-		body = bytes.NewReader(b)
+		body = bytes.NewReader(encoded)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.endpoint(path), body)
 	if err != nil {
@@ -54,18 +72,12 @@ func (c *Client) doJSON(ctx context.Context, method, path string, in, out any, e
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if enrollmentToken != "" {
-		req.Header.Set("Authorization", "Enrollment "+enrollmentToken)
-	} else if c.identity != nil && c.identity.Credential != "" {
-		req.Header.Set("Authorization", c.identity.Authorization())
-	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	limited := io.LimitReader(resp.Body, maxResponseBytes+1)
-	data, err := io.ReadAll(limited)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return err
 	}
@@ -73,7 +85,14 @@ func (c *Client) doJSON(ctx context.Context, method, path string, in, out any, e
 		return errors.New("control plane response exceeds limit")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("control plane returned HTTP %d", resp.StatusCode)
+		apiErr := &APIError{StatusCode: resp.StatusCode}
+		var envelope protocol.ErrorEnvelope
+		if json.Unmarshal(data, &envelope) == nil {
+			apiErr.Code = envelope.Error.Code
+			apiErr.Message = envelope.Error.Message
+			apiErr.RequestID = envelope.Error.RequestID
+		}
+		return apiErr
 	}
 	if out != nil && len(data) > 0 {
 		decoder := json.NewDecoder(bytes.NewReader(data))
@@ -81,61 +100,92 @@ func (c *Client) doJSON(ctx context.Context, method, path string, in, out any, e
 		if err := decoder.Decode(out); err != nil {
 			return fmt.Errorf("decode control plane response: %w", err)
 		}
+		var trailing any
+		if err := decoder.Decode(&trailing); err != io.EOF {
+			return errors.New("control plane response contains multiple JSON values")
+		}
 	}
 	return nil
 }
 
-type EnrollRequest struct{ Name, PublicKey, OS, Architecture, Version string }
-type EnrollResponse struct {
-	AgentID                string `json:"agentId"`
-	Credential             string `json:"credential"`
-	ControlPlaneSigningKey string `json:"controlPlaneSigningKey,omitempty"`
+func (c *Client) Enroll(ctx context.Context, request protocol.EnrollmentRequest) (protocol.EnrollmentResponse, error) {
+	var envelope protocol.DataEnvelope[protocol.EnrollmentResponse]
+	err := c.doJSON(ctx, http.MethodPost, "/agent/v1/enroll", request, &envelope)
+	return envelope.Data, err
 }
 
-func (c *Client) Enroll(ctx context.Context, token string, req EnrollRequest) (EnrollResponse, error) {
-	var out EnrollResponse
-	err := c.doJSON(ctx, http.MethodPost, "/agent/v1/enroll", req, &out, token)
-	return out, err
+func (c *Client) Heartbeat(ctx context.Context, heartbeat protocol.Heartbeat) (protocol.HeartbeatResponse, error) {
+	var envelope protocol.DataEnvelope[protocol.HeartbeatResponse]
+	err := c.doJSON(ctx, http.MethodPost, "/agent/v1/heartbeat", heartbeat, &envelope)
+	return envelope.Data, err
 }
-func (c *Client) NextJob(ctx context.Context) (*jobs.Envelope, error) {
-	var out struct {
-		Job *jobs.Envelope `json:"job"`
+
+func (c *Client) ReportCapabilities(ctx context.Context, report protocol.CapabilityManifest) (protocol.CapabilityResponse, error) {
+	var envelope protocol.DataEnvelope[protocol.CapabilityResponse]
+	err := c.doJSON(ctx, http.MethodPost, "/agent/v1/capabilities", report, &envelope)
+	return envelope.Data, err
+}
+
+func (c *Client) NextJob(ctx context.Context) (*protocol.JobEnvelope, error) {
+	var envelope protocol.DataEnvelope[*protocol.JobEnvelope]
+	if err := c.doJSON(ctx, http.MethodGet, "/agent/v1/jobs/next", nil, &envelope); err != nil {
+		return nil, err
 	}
-	err := c.doJSON(ctx, http.MethodGet, "/agent/v1/jobs/next", nil, &out, "")
-	return out.Job, err
+	return envelope.Data, nil
 }
-func (c *Client) ReportResult(ctx context.Context, result jobs.ModuleResult) error {
-	return c.doJSON(ctx, http.MethodPost, "/agent/v1/jobs/"+url.PathEscape(result.JobID)+"/result", result, nil, "")
+
+func (c *Client) StartJob(ctx context.Context, jobID string) error {
+	return c.doJSON(ctx, http.MethodPost, "/agent/v1/jobs/"+url.PathEscape(jobID)+"/start", nil, nil)
 }
-func (c *Client) ReportEvent(ctx context.Context, event any) error {
-	return c.doJSON(ctx, http.MethodPost, "/agent/v1/events", event, nil, "")
+
+func (c *Client) ReportResult(ctx context.Context, result protocol.JobResult) error {
+	return c.doJSON(ctx, http.MethodPost, "/agent/v1/jobs/"+url.PathEscape(result.JobID)+"/result", result, nil)
 }
-func (c *Client) Heartbeat(ctx context.Context, heartbeat any) error {
-	return c.doJSON(ctx, http.MethodPost, "/agent/v1/heartbeat", heartbeat, nil, "")
-}
-func (c *Client) ReportCapabilities(ctx context.Context, report any) error {
-	return c.doJSON(ctx, http.MethodPost, "/agent/v1/capabilities", report, nil, "")
-}
-func (c *Client) IsCancelled(ctx context.Context, jobID string) (bool, error) {
-	var out struct {
-		Cancelled bool `json:"cancelled"`
+
+func (c *Client) ReportFailure(ctx context.Context, failure protocol.JobFailure) error {
+	err := c.doJSON(ctx, http.MethodPost, "/agent/v1/jobs/"+url.PathEscape(failure.JobID)+"/fail", failure, nil)
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && apiErr.Code == "JOB_STATE_INVALID" {
+		// The failure endpoint is state-machine guarded rather than receipt based.
+		// A retry after an ambiguous response can observe the terminal state.
+		return nil
 	}
-	err := c.doJSON(ctx, http.MethodGet, "/agent/v1/jobs/"+url.PathEscape(jobID)+"/cancellation", nil, &out, "")
-	return out.Cancelled, err
+	return err
 }
+
+func (c *Client) ReportEvidence(ctx context.Context, evidence protocol.EvidenceRequest) error {
+	return c.doJSON(ctx, http.MethodPost, "/agent/v1/evidence", evidence, nil)
+}
+
+func (c *Client) Cancellation(ctx context.Context, jobID string) (protocol.JobCancellation, error) {
+	var envelope protocol.DataEnvelope[protocol.JobCancellation]
+	err := c.doJSON(ctx, http.MethodGet, "/agent/v1/jobs/"+url.PathEscape(jobID)+"/cancellation", nil, &envelope)
+	return envelope.Data, err
+}
+
 func (c *Client) Send(ctx context.Context, kind string, payload json.RawMessage) error {
-	var v any
-	if err := json.Unmarshal(payload, &v); err != nil {
-		return err
-	}
-	if kind == "result" {
-		var r jobs.ModuleResult
-		if err := json.Unmarshal(payload, &r); err != nil {
+	switch kind {
+	case "result":
+		var result protocol.JobResult
+		if err := json.Unmarshal(payload, &result); err != nil {
 			return err
 		}
-		return c.ReportResult(ctx, r)
+		return c.ReportResult(ctx, result)
+	case "failure":
+		var failure protocol.JobFailure
+		if err := json.Unmarshal(payload, &failure); err != nil {
+			return err
+		}
+		return c.ReportFailure(ctx, failure)
+	case "evidence":
+		var evidence protocol.EvidenceRequest
+		if err := json.Unmarshal(payload, &evidence); err != nil {
+			return err
+		}
+		return c.ReportEvidence(ctx, evidence)
+	default:
+		return errors.New("unsupported spool item kind")
 	}
-	return c.ReportEvent(ctx, v)
 }
 
 func Backoff(attempt int, maximum time.Duration) time.Duration {
@@ -145,10 +195,10 @@ func Backoff(attempt int, maximum time.Duration) time.Duration {
 	if attempt > 8 {
 		attempt = 8
 	}
-	d := time.Second * time.Duration(1<<attempt)
-	if d > maximum {
-		d = maximum
+	delay := time.Second * time.Duration(1<<attempt)
+	if delay > maximum {
+		delay = maximum
 	}
-	jitter := time.Duration(rand.Int64N(int64(d/3) + 1))
-	return d + jitter
+	jitter := time.Duration(rand.Int64N(int64(delay/3) + 1))
+	return delay + jitter
 }
