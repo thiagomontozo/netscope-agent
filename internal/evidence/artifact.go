@@ -1,72 +1,38 @@
 package evidence
 
 import (
-	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
 
-	"github.com/thiagomontozo/netscope-agent/internal/jobs"
+	"github.com/thiagomontozo/netscope-agent/internal/protocol"
 )
 
-type Manager struct {
-	DataDir          string
-	MaxArtifactBytes int64
-	HTTP             *http.Client
+func NewManifest(source, summary, artifactKind string, structured map[string]any) (protocol.EvidenceManifest, error) {
+	if source == "" || summary == "" || structured == nil {
+		return protocol.EvidenceManifest{}, errors.New("evidence source, summary and structured data are required")
+	}
+	data, err := json.Marshal(structured)
+	if err != nil {
+		return protocol.EvidenceManifest{}, err
+	}
+	digest := sha256.Sum256(data)
+	id, err := NewID()
+	if err != nil {
+		return protocol.EvidenceManifest{}, err
+	}
+	return protocol.EvidenceManifest{EvidenceID: id, Source: source, ContentType: "application/json", Summary: summary, StructuredData: data, SHA256: hex.EncodeToString(digest[:]), SizeBytes: int64(len(data)), ArtifactKind: artifactKind}, nil
 }
 
-func (m Manager) Download(ctx context.Context, t jobs.Target) (string, func(), error) {
-	if t.ArtifactReference == "" || t.ArtifactSHA256 == "" || t.ArtifactSize < 1 || t.ArtifactSize > m.MaxArtifactBytes {
-		return "", nil, errors.New("artifact metadata incomplete or outside size limit")
+func NewID() (string, error) {
+	value := make([]byte, 16)
+	if _, err := rand.Read(value); err != nil {
+		return "", err
 	}
-	if t.ArtifactExpiresAt.IsZero() || !t.ArtifactExpiresAt.After(time.Now().UTC()) {
-		return "", nil, errors.New("artifact reference expired")
-	}
-	u, err := url.Parse(t.ArtifactReference)
-	if err != nil || u.Scheme != "https" || u.Host == "" {
-		return "", nil, errors.New("artifact reference must be HTTPS")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return "", nil, err
-	}
-	resp, err := m.HTTP.Do(req)
-	if err != nil {
-		return "", nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", nil, fmt.Errorf("artifact server returned HTTP %d", resp.StatusCode)
-	}
-	f, err := os.CreateTemp(filepath.Join(m.DataDir, "temp"), "pcap-*.artifact")
-	if err != nil {
-		return "", nil, err
-	}
-	name := f.Name()
-	cleanup := func() { _ = os.Remove(name) }
-	if err := f.Chmod(0o600); err != nil {
-		f.Close()
-		cleanup()
-		return "", nil, err
-	}
-	h := sha256.New()
-	n, copyErr := io.Copy(io.MultiWriter(f, h), io.LimitReader(resp.Body, m.MaxArtifactBytes+1))
-	closeErr := f.Close()
-	if copyErr != nil || closeErr != nil || n > m.MaxArtifactBytes || n != t.ArtifactSize {
-		cleanup()
-		return "", nil, errors.New("artifact size validation failed")
-	}
-	if !strings.EqualFold(hex.EncodeToString(h.Sum(nil)), t.ArtifactSHA256) {
-		cleanup()
-		return "", nil, errors.New("artifact checksum validation failed")
-	}
-	return name, cleanup, nil
+	value[6] = value[6]&0x0f | 0x40
+	value[8] = value[8]&0x3f | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", value[0:4], value[4:6], value[6:8], value[8:10], value[10:16]), nil
 }

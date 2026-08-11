@@ -42,7 +42,8 @@ func (r Runner) Run(ctx context.Context, binary string, args ...string) (Output,
 	return r.RunInDir(ctx, "", binary, args...)
 }
 func (r Runner) RunInDir(ctx context.Context, dir, binary string, args ...string) (Output, error) {
-	if binary == "" || strings.ContainsAny(binary, "\r\n") {
+	allowed := map[string]bool{"ping": true, "traceroute": true, "tracert": true, "nmap": true, "tshark": true, "zeek": true, "suricata": true, "iperf3": true}
+	if !allowed[binary] || strings.ContainsAny(binary, "\r\n") {
 		return Output{}, errors.New("invalid executable")
 	}
 	path, err := exec.LookPath(binary)

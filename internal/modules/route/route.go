@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/thiagomontozo/netscope-agent/internal/jobs"
 	"github.com/thiagomontozo/netscope-agent/internal/modules"
 	nprocess "github.com/thiagomontozo/netscope-agent/internal/process"
@@ -16,7 +17,8 @@ import (
 
 type Module struct{ Runner nprocess.Runner }
 type params struct {
-	MaxHops int `json:"maxHops"`
+	MaxHops   int `json:"maxHops"`
+	TimeoutMS int `json:"timeoutMs"`
 }
 type hop struct {
 	Hop       int      `json:"hop"`
@@ -28,17 +30,17 @@ type hop struct {
 
 func New(r nprocess.Runner) Module { return Module{Runner: r} }
 func (Module) Descriptor() modules.Descriptor {
-	return modules.Descriptor{ID: "network.route", Version: "1.0.0", RiskClass: jobs.RiskSafeActive, RequiredCapability: "TRACEROUTE", Platforms: []string{"linux", "windows", "darwin"}, ConcurrencyLimit: 2}
+	return modules.Descriptor{ID: "network.route", Version: "0.1.0", RiskClass: jobs.RiskSafeActive, Implementation: "external-tool", RequiredTool: routeBinary(), RequiredCapability: "route", Platforms: []string{"linux", "windows", "darwin"}, ConcurrencyLimit: 2}
 }
 func (Module) Validate(j jobs.Envelope) error {
-	if err := security.ValidateHost(j.Target.Host); err != nil {
+	if _, err := security.Host(j.Target); err != nil {
 		return err
 	}
 	var p params
-	if err := json.Unmarshal(j.Parameters, &p); err != nil {
+	if err := modules.DecodeParameters(j.ValidatedParameters, &p); err != nil {
 		return err
 	}
-	if p.MaxHops < 1 || p.MaxHops > 30 {
+	if p.MaxHops < 1 || p.MaxHops > 32 || p.TimeoutMS < 100 || p.TimeoutMS > 10000 {
 		return errors.New("maxHops outside safe profile")
 	}
 	return nil
@@ -46,18 +48,26 @@ func (Module) Validate(j jobs.Envelope) error {
 func (m Module) Execute(ctx context.Context, j jobs.Envelope) (jobs.ModuleResult, error) {
 	start := time.Now().UTC()
 	var p params
-	_ = json.Unmarshal(j.Parameters, &p)
+	_ = json.Unmarshal(j.ValidatedParameters, &p)
+	host, _ := security.Host(j.Target)
 	binary := "traceroute"
-	args := []string{"-m", strconv.Itoa(p.MaxHops), "-n", j.Target.Host}
+	args := []string{"-m", strconv.Itoa(p.MaxHops), "-n", "-w", fmt.Sprintf("%.3f", float64(p.TimeoutMS)/1000), host}
 	if runtime.GOOS == "windows" {
 		binary = "tracert"
-		args = []string{"-h", strconv.Itoa(p.MaxHops), "-d", j.Target.Host}
+		args = []string{"-h", strconv.Itoa(p.MaxHops), "-d", "-w", strconv.Itoa(p.TimeoutMS), host}
 	}
 	out, err := m.Runner.Run(ctx, binary, args...)
 	hops := normalize(string(out.Stdout))
 	r := jobs.ModuleResult{JobID: j.JobID, ModuleID: j.ModuleID, StartedAt: start, CompletedAt: time.Now().UTC(), Status: "COMPLETED", Summary: "Route trace profile completed", Observations: []jobs.Observation{{Kind: "route.raw_bounded", Message: "Adapter output for normalized route processing", Data: map[string]any{"output": strings.TrimSpace(string(out.Stdout))}}}, Truncated: out.StdoutTruncated || out.StderrTruncated}
 	r.Observations = []jobs.Observation{{Kind: "route.hops", Message: "Normalized route hops", Data: map[string]any{"hops": hops}}}
 	return r, err
+}
+
+func routeBinary() string {
+	if runtime.GOOS == "windows" {
+		return "tracert"
+	}
+	return "traceroute"
 }
 
 func normalize(output string) []hop {

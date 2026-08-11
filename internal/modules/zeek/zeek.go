@@ -3,42 +3,35 @@ package zeek
 import (
 	"context"
 	"errors"
+
 	"github.com/thiagomontozo/netscope-agent/internal/jobs"
 	"github.com/thiagomontozo/netscope-agent/internal/modules"
 	nprocess "github.com/thiagomontozo/netscope-agent/internal/process"
-	"github.com/thiagomontozo/netscope-agent/internal/security"
-	"os"
-	"path/filepath"
-	"time"
 )
 
 type Module struct {
 	Runner  nprocess.Runner
 	DataDir string
 }
+type params struct {
+	ArtifactID string `json:"artifactId"`
+	Preset     string `json:"preset"`
+}
 
-func New(r nprocess.Runner, d string) Module { return Module{r, d} }
+func New(r nprocess.Runner, dataDir string) Module { return Module{Runner: r, DataDir: dataDir} }
 func (Module) Descriptor() modules.Descriptor {
-	return modules.Descriptor{ID: "traffic.zeek", Version: "1.0.0", RiskClass: jobs.RiskPassive, RequiredTool: "zeek", RequiredCapability: "ZEEK", Platforms: []string{"linux", "darwin"}, ConcurrencyLimit: 1}
+	return modules.Descriptor{ID: "traffic.zeek", Version: "0.1.0", RiskClass: jobs.RiskPassive, Implementation: "external-tool", RequiredTool: "zeek", RequiredCapability: "zeek", Platforms: []string{"linux", "darwin"}, ConcurrencyLimit: 1}
 }
-func (m Module) Validate(j jobs.Envelope) error {
-	if len(j.Parameters) > 0 && string(j.Parameters) != "{}" && string(j.Parameters) != "null" {
-		return errors.New("Zeek v0.1 accepts no parameters")
+func (Module) Validate(job jobs.Envelope) error {
+	var parameters params
+	if err := modules.DecodeParameters(job.ValidatedParameters, &parameters); err != nil {
+		return err
 	}
-	return security.ValidateTemporaryArtifact(m.DataDir, j.Target.ArtifactReference)
+	if parameters.ArtifactID == "" || (parameters.Preset != "METADATA" && parameters.Preset != "PROTOCOL_SUMMARY" && parameters.Preset != "EVE_IMPORT") {
+		return errors.New("Zeek artifact or preset is invalid")
+	}
+	return errors.New("Protocol v1 does not define authorized artifact content delivery")
 }
-func (m Module) Execute(ctx context.Context, j jobs.Envelope) (jobs.ModuleResult, error) {
-	start := time.Now().UTC()
-	dir, err := os.MkdirTemp(filepath.Join(m.DataDir, "temp"), "zeek-*")
-	if err != nil {
-		return jobs.ModuleResult{}, err
-	}
-	defer os.RemoveAll(dir)
-	out, err := m.Runner.RunInDir(ctx, dir, "zeek", "-r", j.Target.ArtifactReference)
-	logs, _ := filepath.Glob(filepath.Join(dir, "*.log"))
-	names := make([]string, 0, len(logs))
-	for _, p := range logs {
-		names = append(names, filepath.Base(p))
-	}
-	return jobs.ModuleResult{JobID: j.JobID, ModuleID: j.ModuleID, StartedAt: start, CompletedAt: time.Now().UTC(), Status: "COMPLETED", Summary: "Zeek offline PCAP analysis completed", Observations: []jobs.Observation{{Kind: "zeek.logs", Message: "Expected logs produced in isolated temporary directory", Data: map[string]any{"logs": names}}}, Truncated: out.StdoutTruncated || out.StderrTruncated}, err
+func (Module) Execute(context.Context, jobs.Envelope) (jobs.ModuleResult, error) {
+	return jobs.ModuleResult{}, errors.New("artifact content is unavailable")
 }

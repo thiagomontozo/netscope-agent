@@ -1,17 +1,35 @@
 package modules
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"sort"
 	"sync"
 
 	"github.com/thiagomontozo/netscope-agent/internal/jobs"
 )
 
+func DecodeParameters(data json.RawMessage, destination any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return errors.New("multiple parameter values are not allowed")
+	}
+	return nil
+}
+
 type Descriptor struct {
 	ID, Version                      string
 	RiskClass                        jobs.RiskClass
+	Implementation                   string
 	RequiredTool, RequiredCapability string
 	Platforms                        []string
 	ConcurrencyLimit                 int
@@ -60,6 +78,7 @@ func (r *Registry) Descriptors() []Descriptor {
 	for _, m := range r.modules {
 		out = append(out, m.Descriptor())
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
 func (r *Registry) Acquire(ctx context.Context, id string) (func(), error) {

@@ -1,55 +1,37 @@
 package suricata
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
+
 	"github.com/thiagomontozo/netscope-agent/internal/jobs"
 	"github.com/thiagomontozo/netscope-agent/internal/modules"
 	nprocess "github.com/thiagomontozo/netscope-agent/internal/process"
-	"github.com/thiagomontozo/netscope-agent/internal/security"
-	"os"
-	"path/filepath"
-	"time"
 )
 
 type Module struct {
 	Runner  nprocess.Runner
 	DataDir string
 }
+type params struct {
+	ArtifactID string `json:"artifactId"`
+	Preset     string `json:"preset"`
+}
 
-func New(r nprocess.Runner, d string) Module { return Module{r, d} }
+func New(r nprocess.Runner, dataDir string) Module { return Module{Runner: r, DataDir: dataDir} }
 func (Module) Descriptor() modules.Descriptor {
-	return modules.Descriptor{ID: "security.suricata", Version: "1.0.0", RiskClass: jobs.RiskPassive, RequiredTool: "suricata", RequiredCapability: "SURICATA", Platforms: []string{"linux", "windows", "darwin"}, ConcurrencyLimit: 1}
+	return modules.Descriptor{ID: "security.suricata", Version: "0.1.0", RiskClass: jobs.RiskPassive, Implementation: "external-tool", RequiredTool: "suricata", RequiredCapability: "suricata", Platforms: []string{"linux", "windows", "darwin"}, ConcurrencyLimit: 1}
 }
-func (m Module) Validate(j jobs.Envelope) error {
-	if len(j.Parameters) > 0 && string(j.Parameters) != "{}" && string(j.Parameters) != "null" {
-		return errors.New("Suricata v0.1 accepts no parameters")
+func (Module) Validate(job jobs.Envelope) error {
+	var parameters params
+	if err := modules.DecodeParameters(job.ValidatedParameters, &parameters); err != nil {
+		return err
 	}
-	return security.ValidateTemporaryArtifact(m.DataDir, j.Target.ArtifactReference)
+	if parameters.ArtifactID == "" || (parameters.Preset != "METADATA" && parameters.Preset != "PROTOCOL_SUMMARY" && parameters.Preset != "EVE_IMPORT") {
+		return errors.New("Suricata artifact or preset is invalid")
+	}
+	return errors.New("Protocol v1 does not define authorized artifact content delivery")
 }
-func (m Module) Execute(ctx context.Context, j jobs.Envelope) (jobs.ModuleResult, error) {
-	start := time.Now().UTC()
-	dir, err := os.MkdirTemp(filepath.Join(m.DataDir, "temp"), "suricata-*")
-	if err != nil {
-		return jobs.ModuleResult{}, err
-	}
-	defer os.RemoveAll(dir)
-	out, err := m.Runner.Run(ctx, "suricata", "-r", j.Target.ArtifactReference, "-l", dir)
-	alerts := 0
-	if f, e := os.Open(filepath.Join(dir, "eve.json")); e == nil {
-		defer f.Close()
-		s := bufio.NewScanner(f)
-		s.Buffer(make([]byte, 64<<10), 1<<20)
-		for s.Scan() {
-			var v struct {
-				EventType string `json:"event_type"`
-			}
-			if json.Unmarshal(s.Bytes(), &v) == nil && v.EventType == "alert" {
-				alerts++
-			}
-		}
-	}
-	return jobs.ModuleResult{JobID: j.JobID, ModuleID: j.ModuleID, StartedAt: start, CompletedAt: time.Now().UTC(), Status: "COMPLETED", Summary: "Suricata offline PCAP analysis completed", Metrics: map[string]float64{"alertCount": float64(alerts)}, Truncated: out.StdoutTruncated || out.StderrTruncated}, err
+func (Module) Execute(context.Context, jobs.Envelope) (jobs.ModuleResult, error) {
+	return jobs.ModuleResult{}, errors.New("artifact content is unavailable")
 }

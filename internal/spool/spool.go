@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -22,9 +23,15 @@ type Queue struct {
 	Dir      string
 	MaxBytes int64
 	MaxAge   time.Duration
+	mu       sync.Mutex
 }
 
-func (q Queue) Enqueue(kind string, v any) error {
+func (q *Queue) Enqueue(kind string, v any) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if kind != "result" && kind != "failure" && kind != "evidence" {
+		return errors.New("unsupported spool item kind")
+	}
 	payload, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -36,7 +43,7 @@ func (q Queue) Enqueue(kind string, v any) error {
 	if int64(len(b)) > q.MaxBytes {
 		return errors.New("spool item exceeds total spool limit")
 	}
-	size, err := q.size()
+	_, size, err := q.healthUnlocked()
 	if err != nil {
 		return err
 	}
@@ -65,7 +72,10 @@ func (q Queue) Enqueue(kind string, v any) error {
 	}
 	return f.Sync()
 }
-func (q Queue) Flush(ctx context.Context, s Sender) error {
+
+func (q *Queue) Flush(ctx context.Context, s Sender) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	entries, err := os.ReadDir(q.Dir)
 	if err != nil {
 		return err
@@ -81,6 +91,10 @@ func (q Queue) Flush(ctx context.Context, s Sender) error {
 			continue
 		}
 		if time.Since(info.ModTime()) > q.MaxAge {
+			_ = os.Remove(p)
+			continue
+		}
+		if info.Size() < 1 || info.Size() > q.MaxBytes {
 			_ = os.Remove(p)
 			continue
 		}
@@ -102,7 +116,13 @@ func (q Queue) Flush(ctx context.Context, s Sender) error {
 	}
 	return nil
 }
-func (q Queue) Health() (int, int64, error) {
+func (q *Queue) Health() (int, int64, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.healthUnlocked()
+}
+
+func (q *Queue) healthUnlocked() (int, int64, error) {
 	e, err := os.ReadDir(q.Dir)
 	if err != nil {
 		return 0, 0, err
@@ -121,4 +141,3 @@ func (q Queue) Health() (int, int64, error) {
 	}
 	return n, size, nil
 }
-func (q Queue) size() (int64, error) { _, n, e := q.Health(); return n, e }

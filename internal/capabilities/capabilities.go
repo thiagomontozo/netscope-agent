@@ -7,77 +7,130 @@ import (
 	"encoding/json"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
+
+	"github.com/thiagomontozo/netscope-agent/internal/modules"
+	"github.com/thiagomontozo/netscope-agent/internal/protocol"
 )
 
-type Capability struct {
-	ID          string `json:"id"`
-	Available   bool   `json:"available"`
-	Tool        string `json:"tool,omitempty"`
-	ToolVersion string `json:"toolVersion,omitempty"`
-	Reason      string `json:"reason,omitempty"`
-}
 type Report struct {
-	OS           string       `json:"os"`
-	Architecture string       `json:"architecture"`
-	Items        []Capability `json:"items"`
+	Manifest  protocol.CapabilityManifest
+	available map[string]bool
 }
 
-func Discover(ctx context.Context) Report {
-	items := []Capability{{ID: "DNS", Available: true}, {ID: "TCP", Available: true}, {ID: "HTTP", Available: true}, {ID: "TLS", Available: true}}
-	if runtime.GOOS == "windows" {
-		items = append(items, binary(ctx, "PING", "ping", []string{"/?"}), binary(ctx, "TRACEROUTE", "tracert", []string{"/?"}))
-	} else {
-		items = append(items, binary(ctx, "PING", "ping", []string{"-V"}), binary(ctx, "TRACEROUTE", "traceroute", []string{"--version"}))
-	}
-	for _, t := range []struct {
-		id, name string
-		args     []string
-	}{{"NMAP", "nmap", []string{"--version"}}, {"TSHARK", "tshark", []string{"--version"}}, {"ZEEK", "zeek", []string{"--version"}}, {"SURICATA", "suricata", []string{"--build-info"}}, {"IPERF3", "iperf3", []string{"--version"}}} {
-		items = append(items, binary(ctx, t.id, t.name, t.args))
-	}
-	return Report{OS: runtime.GOOS, Architecture: runtime.GOARCH, Items: items}
+type toolState struct {
+	Name      string
+	Version   string
+	Available bool
 }
 
-func binary(parent context.Context, id, name string, args []string) Capability {
-	p, err := exec.LookPath(name)
+func Discover(ctx context.Context, agentID string, registry *modules.Registry) Report {
+	toolNames := []string{"ping", routeTool(), "nmap", "tshark", "zeek", "suricata", "iperf3", "greenbone"}
+	tools := make(map[string]toolState, len(toolNames))
+	external := make([]protocol.ExternalTool, 0, len(toolNames))
+	for _, name := range toolNames {
+		state := detectTool(ctx, name)
+		tools[name] = state
+		external = append(external, protocol.ExternalTool{Name: state.Name, Version: state.Version, Available: state.Available})
+	}
+	sort.Slice(external, func(i, j int) bool { return external[i].Name < external[j].Name })
+
+	manifest := protocol.CapabilityManifest{ProtocolVersion: protocol.Version, AgentID: agentID, Platform: runtime.GOOS + "/" + runtime.GOARCH, ExternalTools: external, ArtifactCapabilities: []string{}}
+	available := make(map[string]bool)
+	for _, descriptor := range registry.Descriptors() {
+		isAvailable := supportedPlatform(descriptor.Platforms, runtime.GOOS)
+		if descriptor.RequiredTool != "" {
+			isAvailable = isAvailable && tools[descriptor.RequiredTool].Available
+		}
+		// Protocol v1 has artifact metadata registration but no authorized
+		// artifact content delivery contract. These adapters remain compiled but
+		// are deliberately not advertised until that contract exists.
+		if strings.HasPrefix(descriptor.ID, "traffic.") || descriptor.ID == "security.suricata" || descriptor.ID == "performance.iperf3" {
+			isAvailable = false
+		}
+		manifest.Modules = append(manifest.Modules, protocol.ModuleCapability{ModuleID: descriptor.ID, CapabilityID: descriptor.RequiredCapability, Available: isAvailable, Implementation: descriptor.Implementation, ModuleVersion: descriptor.Version, RiskClasses: []protocol.RiskClass{descriptor.RiskClass}})
+		available[descriptor.RequiredCapability] = isAvailable
+		if isAvailable {
+			manifest.NetworkCapabilities = append(manifest.NetworkCapabilities, descriptor.RequiredCapability)
+		}
+	}
+	sort.Slice(manifest.Modules, func(i, j int) bool { return manifest.Modules[i].ModuleID < manifest.Modules[j].ModuleID })
+	sort.Strings(manifest.NetworkCapabilities)
+	return Report{Manifest: manifest, available: available}
+}
+
+func detectTool(parent context.Context, name string) toolState {
+	state := toolState{Name: name}
+	path, err := exec.LookPath(name)
 	if err != nil {
-		return Capability{ID: id, Available: false, Tool: name, Reason: "tool not found"}
+		return state
 	}
+	state.Available = true
 	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, p, args...)
-	cmd.Env = []string{"PATH=" + minimalPath()}
-	out, err := cmd.CombinedOutput()
-	if len(out) > 256 {
-		out = out[:256]
+	args := versionArguments(name)
+	command := exec.CommandContext(ctx, path, args...)
+	command.Env = []string{"PATH=" + minimalPath()}
+	output, err := command.CombinedOutput()
+	if len(output) > 256 {
+		output = output[:256]
 	}
-	version := strings.TrimSpace(strings.Split(string(out), "\n")[0])
-	if ctx.Err() != nil {
-		return Capability{ID: id, Available: true, Tool: name, Reason: "version detection timed out"}
+	if err == nil || len(output) > 0 {
+		state.Version = strings.TrimSpace(strings.Split(string(output), "\n")[0])
 	}
-	if err != nil && version == "" {
-		return Capability{ID: id, Available: true, Tool: name, Reason: "version unavailable"}
-	}
-	return Capability{ID: id, Available: true, Tool: name, ToolVersion: version}
+	return state
 }
+
+func versionArguments(name string) []string {
+	if runtime.GOOS == "windows" && (name == "ping" || name == "tracert") {
+		return []string{"/?"}
+	}
+	if name == "suricata" {
+		return []string{"--build-info"}
+	}
+	return []string{"--version"}
+}
+
+func routeTool() string {
+	if runtime.GOOS == "windows" {
+		return "tracert"
+	}
+	return "traceroute"
+}
+
 func minimalPath() string {
 	if runtime.GOOS == "windows" {
 		return `C:\Windows\System32;C:\Windows`
 	}
 	return "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 }
-func (r Report) Hash() string {
-	b, _ := json.Marshal(r)
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])
-}
-func (r Report) Has(id string) bool {
-	for _, c := range r.Items {
-		if c.ID == id {
-			return c.Available
+
+func supportedPlatform(platforms []string, current string) bool {
+	for _, platform := range platforms {
+		if platform == current {
+			return true
 		}
 	}
 	return false
+}
+
+func (r Report) Hash() string {
+	encoded, _ := json.Marshal(r.Manifest)
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:])
+}
+
+func (r Report) Has(capabilityID string) bool { return r.available[capabilityID] }
+
+func (r Report) Summary() []string {
+	items := make([]string, 0, len(r.available))
+	for capabilityID, available := range r.available {
+		if available {
+			items = append(items, capabilityID)
+		}
+	}
+	sort.Strings(items)
+	return items
 }
