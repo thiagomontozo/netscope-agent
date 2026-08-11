@@ -1,47 +1,30 @@
 # Architecture
 
-## System boundary
-
-NetScope Agent is an outbound-only execution worker. The Control Plane owns policy,
-scope creation, scheduling, and correlation. The Agent retains an independent local
-trust boundary: a job must pass transport, signature, expiry, identity, protocol,
-risk, capability, module-schema, target, and authorization checks.
+NetScope Agent is an outbound-only Go worker. The Control Plane owns authorization and context; the Agent maintains an independent validation and resource boundary.
 
 ```text
-Control Plane                         Monitored network
-┌──────────────────┐       HTTPS      ┌─────────────────────────┐
-│ enrollment       │ <─────────────── │ identity + enrollment   │
-│ heartbeat/jobs   │ <─────────────── │ client + backoff        │
-│ results/evidence │ <─────────────── │ verifier → executor     │
-│ audit log        │ <─────────────── │ modules → bounded tools │
-└──────────────────┘   Agent starts   └─────────────────────────┘
-                      every connection
+Control Plane /agent/v1
+        ^ HTTPS + client mTLS
+        |
+Client -> Protocol types -> Job verifier -> Executor -> Compiled registry
+                              |              |          |
+                         nonce/target    limits/cancel  Go or fixed adapter
+                                             |
+                                 Result normalization -> bounded spool
 ```
 
-No component listens for arbitrary execution requests. The static registry maps a
-signed `moduleId` to compiled code. Go-native modules use `net`, `net/http`, and
-`crypto/tls`. External adapters invoke a located binary directly with
-`exec.CommandContext(binary, validatedArgs...)`; no shell parses those arguments.
+Startup loads configuration, builds the compiled registry, discovers fixed capabilities, loads or enrolls the certificate identity, creates the mTLS client, publishes the capability manifest and sends an initial heartbeat. The Agent then alternates heartbeat and job polling. It never starts a local listener or accepts an inbound command.
 
-## Runtime flow
+`internal/protocol` is the single wire-model package. Module results are internal and cannot be sent until the central Executor normalizes them into Protocol v1. External tools pass through the bounded process runner; the runner accepts only a compiled executable allowlist and never invokes a shell.
 
-Startup creates protected data directories, loads or enrolls identity, builds a
-validated TLS client, pins the Control Plane Ed25519 job key, discovers capabilities,
-and constructs the static registry. Polling stops on SIGINT/SIGTERM. Accepted work
-gets a global slot, module slot, deadline, cancellation context, bounded buffers,
-and optional verified temporary PCAP. Results are normalized and delivered or put
-in the bounded spool. Shutdown stops polling, waits for running work under its
-existing policy, attempts a final heartbeat/audit event, cleans per-job temporary
-files, closes idle connections, and exits.
-
-## Data directory
+Runtime state:
 
 ```text
 data/
-├── identity/  # Ed25519 identity, credential, pinned server key
-├── spool/     # small pending result/event JSON documents
-├── temp/      # verified short-lived artifacts and isolated tool output
-└── state/     # reserved local state
+  identity/  # private key, client certificate, public CA, metadata
+  spool/     # exact pending result/failure/evidence JSON
+  temp/      # reserved bounded temporary content
+  state/     # reserved operational state
 ```
 
-These paths are runtime state and are excluded from version control.
+The Control Plane artifact API currently registers metadata only. No component fabricates an artifact-content transport.

@@ -1,21 +1,18 @@
 # Enrollment
 
-1. An administrator creates a short-lived, single-use token in the Control Plane.
-2. On first start, the Agent generates an Ed25519 key pair locally.
-3. It sends `POST /agent/v1/enroll` over validated HTTPS with its name, version,
-   platform, and public key. The token is carried only in the enrollment request.
-4. The Control Plane validates and consumes the token, registers the public identity,
-   and returns an agent ID and permanent credential. It may also return the pinned
-   Ed25519 public key used to verify job envelopes.
-5. The Agent atomically stores identity material with mode `0600` and subsequently
-   uses the permanent credential. The administrator removes the token from the
-   persistent service environment.
+Protocol v1 enrollment uses `POST /agent/v1/enroll` with a direct JSON body containing `protocolVersion`, `enrollmentToken`, `agentName`, hostname, OS, architecture, agent version, a PKCS#10 CSR, initial capability IDs and optional network zone.
 
-The private key never leaves the host. Failed enrollment does not write a partial
-identity. Re-enrollment requires an explicit administrative recovery procedure; the
-Agent does not silently overwrite an existing identity.
+The Agent creates an ECDSA P-256 key locally and sends only the CSR. The Control Plane atomically consumes the short-lived token, issues a 90-day client-auth certificate and returns:
 
-Production deployments should combine restrictive filesystem ACLs with an OS
-keystore or hardware-backed key design when their risk model requires it. Token and
-permanent credentials must never appear in logs, process arguments, or scanner
-environments.
+- agent and organization UUIDs;
+- protocol and agent status;
+- public Control Plane CA material;
+- client certificate and expiry;
+- server time;
+- an optional job-signing public key, currently absent because signing is inactive.
+
+The private key, certificate, CA and metadata are written to a staging directory and installed together. Existing or partial identity material is never overwritten silently. After success the process unsets `NETSCOPE_ENROLLMENT_TOKEN`; operators must also remove it from the service configuration.
+
+All later `/agent/v1` calls present the client certificate. The Control Plane hashes its DER bytes and matches the fingerprint to an ONLINE, DEGRADED or OFFLINE non-expired agent. REVOKED and unknown identities are rejected.
+
+Certificate rotation is not exposed by the current Agent API. Recovery or re-enrollment must be an explicit administrative procedure.

@@ -1,29 +1,20 @@
 # Modules
 
-Each compiled module declares ID, semantic version, risk class, required tool,
-required capability, supported platforms, and concurrency limit. The interface has
-separate `Validate` and `Execute` phases. The executor validates the signed envelope
-before selecting a module, then requires exact risk-class compatibility and an
-available capability.
+All module IDs, versions, risk classes, capability IDs and parameter names match the current Control Plane catalog.
 
-| Module | Implementation | Risk | Main controls |
-|---|---|---|---|
-| `network.ping` | fixed platform adapter | SAFE_ACTIVE | count 1–5; bounded timeout |
-| `network.route` | traceroute/tracert adapter | SAFE_ACTIVE | max 30 hops; no user flags |
-| `network.dns` | Go resolver | SAFE_ACTIVE | record-type allowlist |
-| `network.tcp` | `net.Dialer` | SAFE_ACTIVE | validated port and timeout |
-| `network.http` | `net/http` | SAFE_ACTIVE | HEAD/GET; body/redirect bounds; same-host redirects |
-| `network.tls` | `crypto/tls` | SAFE_ACTIVE | server-name validation; metadata only |
-| `nmap.discovery` | fixed Nmap XML profile | SAFE_ACTIVE | no NSE/evasion/spoofing/free args |
-| `nmap.services` | fixed Nmap XML profile | CONTROLLED_ACTIVE | controlled endpoint + authorization |
-| `traffic.tshark` | offline PCAP adapter | PASSIVE | three fixed profiles; no live capture/filter input |
-| `traffic.zeek` | offline PCAP adapter | PASSIVE | isolated temp directory; expected logs only |
-| `security.suricata` | offline EVE JSON adapter | PASSIVE | no IPS or traffic alteration |
-| `performance.iperf3` | fixed JSON profile | CONTROLLED_ACTIVE | controlled endpoint; 30s max; fixed UDP rate |
+| Module | Parameters |
+|---|---|
+| `network.ping` | `samples` 1-10, `timeoutMs` 100-10000 |
+| `network.route` | `maxHops` 1-32, `timeoutMs` 100-10000 |
+| `network.dns` | `recordType`: A, AAAA, CNAME, MX, TXT, NS |
+| `network.tcp` | `port` 1-65535, `timeoutMs` 100-10000 |
+| `network.http` | HEAD/GET, redirect limit 0-5, expected status, bounded response bytes |
+| `network.tls` | port and expiry-warning days |
+| `nmap.discovery` | `DISCOVERY`, max 256 hosts |
+| `nmap.services` | controlled service profile, max 64 hosts |
+| PCAP adapters | artifact ID and compiled preset; unavailable until content delivery exists |
+| `performance.iperf3` | endpoint ID and duration; unavailable until endpoint resolution exists |
 
-Tools are never installed automatically. No Greenbone adapter is part of the base
-Agent. v0.1 cannot load server-supplied `.so` files or any other executable plugin.
+DNS, TCP, HTTP and TLS use Go. Ping and route use OS adapters. Nmap uses only `-sn` or a fixed connect/service profile with XML output. There are no arbitrary NSE scripts, stealth/evasion/spoofing controls or free-form arguments.
 
-New modules must define a narrow schema, risk class, target invariants, required
-authorization, output normalization, failure codes, resource bounds, concurrency,
-platform behavior, and documentation before registry inclusion.
+The registry is compiled. A module must match the envelope's exact `moduleVersionRequirement` (`0.1.0` today), risk class and reported capability before execution.

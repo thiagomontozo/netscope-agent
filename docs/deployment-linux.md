@@ -7,9 +7,16 @@ Copy `packaging/systemd/netscope-agent.service`, review its hardening settings, 
 enable it according to local change-control practice.
 
 Keep the enrollment token only for the first successful start, then remove it from
-`agent.env` and restart. Protect custom CA, mTLS key, and Control Plane signing-key
-files from all users except the service identity. Prefer journald for structured
-logs instead of a separate writable log directory.
+`agent.env` and restart. The Agent also clears the token from its own process
+environment after successful enrollment. Protect `NETSCOPE_SERVER_CA_CERT` and the
+state directory from all users except the service identity. The generated key,
+client certificate, enrollment CA, fingerprint, and metadata are kept below
+`/var/lib/netscope-agent/identity`; the private key is created with mode `0600` and
+the identity directory with mode `0700`. Prefer journald for structured logs.
+
+Certificate rotation is not yet exposed by the Control Plane. Monitor the stored
+certificate expiry and perform an administratively approved re-enrollment before it
+expires. Do not delete a working identity as an automated recovery mechanism.
 
 The base unit grants no capabilities. Go-native DNS/TCP/HTTP/TLS need none. ICMP or
 capture-related tools may require narrowly scoped Linux capabilities depending on

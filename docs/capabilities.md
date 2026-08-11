@@ -1,19 +1,15 @@
 # Capabilities
 
-Discovery runs at startup and reports OS, architecture, supported Go-native network
-operations, and presence of expected binaries. The capability set includes `PING`,
-`TRACEROUTE`, `DNS`, `TCP`, `HTTP`, `TLS`, `NMAP`, `TSHARK`, `ZEEK`, `SURICATA`, and
-`IPERF3`.
+`CapabilityManifest` exactly matches Protocol v1:
 
-Version detection uses only each adapter's fixed version/help arguments, a two-second
-deadline, a minimal environment, and a 256-byte summary of the first output line.
-Full tool output is not reported. A binary that is absent produces
-`available=false`; the Agent never downloads or installs it.
+- `protocolVersion`, `agentId`, `platform`;
+- sorted module entries with module/capability ID, availability, `builtin` or `external-tool`, version and risk class;
+- sorted external tool entries;
+- sorted network capability IDs;
+- artifact capability IDs.
 
-The heartbeat sends a SHA-256 hash of the capability report. A changed hash allows
-the Control Plane to request/refetch the current report and emit
-`agent.capabilities_changed`. Module descriptors additionally expose supported
-module versions so the scheduler can avoid incompatible jobs.
+Tool presence/version detection uses fixed help/version arguments, a two-second context, a minimal environment and at most 256 output bytes. Nothing is installed.
 
-Availability does not equal authorization. A label, network zone, installed binary,
-or reported capability cannot by itself authorize an active assessment.
+The manifest is deterministically sorted and JSON encoded before SHA-256 hashing. The Agent compares its hash with the hash returned by `POST /agent/v1/capabilities`; a mismatch stops startup. Heartbeats reuse that hash.
+
+PCAP modules are compiled but `available=false` because Protocol v1 does not deliver artifact content. iperf is likewise unavailable because the envelope provides a controlled endpoint ID without resolved destination details. This fail-closed behavior prevents accidental dispatch.
