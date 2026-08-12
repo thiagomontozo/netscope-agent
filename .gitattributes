@@ -1,0 +1,2 @@
+contracts/agent/v1/test-vectors/*.json text eol=lf
+contracts/agent/v1/contract-manifest.sha256 text eol=lf
