@@ -41,3 +41,25 @@ func TestVerifySignedJobAndRejectTamper(t *testing.T) {
 		t.Fatal("tampered job signature was accepted")
 	}
 }
+
+func TestVerifyDecimalJobAndRejectDecimalMutation(t *testing.T) {
+	seed, _ := hex.DecodeString("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")
+	private := ed25519.NewKeyFromSeed(seed)
+	public := private.Public().(ed25519.PublicKey)
+	job := signedTestEnvelope()
+	job.ValidatedParameters = []byte(`{"port":443,"packetLossThreshold":2.5,"latencyMultiplier":1.25,"negativeExample":-3.75}`)
+	payload, err := CanonicalJobPayload(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(private, payload))
+	keys := map[string]ed25519.PublicKey{job.SigningKeyID: public}
+	if err := VerifyJobSignature(job, keys); err != nil {
+		t.Fatal(err)
+	}
+
+	job.ValidatedParameters = []byte(`{"port":443,"packetLossThreshold":2.5,"latencyMultiplier":1.26,"negativeExample":-3.75}`)
+	if err := VerifyJobSignature(job, keys); err == nil {
+		t.Fatal("mutated decimal parameter was accepted")
+	}
+}

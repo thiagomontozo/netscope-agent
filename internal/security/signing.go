@@ -1,7 +1,6 @@
 package security
 
 import (
-	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
@@ -9,12 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"sort"
-	"strconv"
-	"strings"
 	"time"
 
+	"github.com/thiagomontozo/netscope-agent/internal/canonicaljson"
 	"github.com/thiagomontozo/netscope-agent/internal/protocol"
 )
 
@@ -66,14 +62,9 @@ func VerifyJobSignature(job protocol.JobEnvelope, keys map[string]ed25519.Public
 }
 
 func CanonicalJobPayload(job protocol.JobEnvelope) ([]byte, error) {
-	var parameters any
-	decoder := json.NewDecoder(bytes.NewReader(job.ValidatedParameters))
-	decoder.UseNumber()
-	if err := decoder.Decode(&parameters); err != nil {
+	parameters, err := canonicaljson.Canonicalize(job.ValidatedParameters)
+	if err != nil {
 		return nil, fmt.Errorf("decode validated parameters: %w", err)
-	}
-	if decoder.Decode(&struct{}{}) != io.EOF {
-		return nil, errors.New("validated parameters contain trailing JSON")
 	}
 	payload := map[string]any{
 		"agentId": job.AgentID, "authorizationReference": job.AuthorizationReference,
@@ -82,7 +73,7 @@ func CanonicalJobPayload(job protocol.JobEnvelope) ([]byte, error) {
 		"organizationId": job.OrganizationID, "protocolVersion": job.ProtocolVersion,
 		"riskClass": job.RiskClass, "scopeEnvironment": job.ScopeEnvironment, "scopeId": job.ScopeID,
 		"target":         map[string]any{"type": job.Target.Type, "value": job.Target.Value},
-		"timeoutSeconds": job.TimeoutSeconds, "validatedParameters": parameters,
+		"timeoutSeconds": job.TimeoutSeconds, "validatedParameters": json.RawMessage(parameters),
 	}
 	if job.AssetID != nil {
 		payload["assetId"] = *job.AssetID
@@ -90,81 +81,5 @@ func CanonicalJobPayload(job protocol.JobEnvelope) ([]byte, error) {
 	if job.ServiceID != nil {
 		payload["serviceId"] = *job.ServiceID
 	}
-	var output bytes.Buffer
-	if err := writeCanonical(&output, payload); err != nil {
-		return nil, err
-	}
-	return output.Bytes(), nil
-}
-
-func writeCanonical(output *bytes.Buffer, value any) error {
-	switch typed := value.(type) {
-	case nil:
-		output.WriteString("null")
-	case bool:
-		if typed {
-			output.WriteString("true")
-		} else {
-			output.WriteString("false")
-		}
-	case string:
-		encoded, _ := json.Marshal(typed)
-		output.Write(encoded)
-	case protocol.RiskClass:
-		encoded, _ := json.Marshal(string(typed))
-		output.Write(encoded)
-	case int:
-		output.WriteString(strconv.Itoa(typed))
-	case json.Number:
-		if strings.ContainsAny(string(typed), ".eE") {
-			return errors.New("signed job parameters must use integer JSON numbers")
-		}
-		if _, err := strconv.ParseInt(string(typed), 10, 64); err != nil {
-			return errors.New("invalid signed job integer")
-		}
-		output.WriteString(string(typed))
-	case []any:
-		output.WriteByte('[')
-		for index, item := range typed {
-			if index > 0 {
-				output.WriteByte(',')
-			}
-			if err := writeCanonical(output, item); err != nil {
-				return err
-			}
-		}
-		output.WriteByte(']')
-	case map[string]any:
-		keys := make([]string, 0, len(typed))
-		for key := range typed {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		output.WriteByte('{')
-		for index, key := range keys {
-			if index > 0 {
-				output.WriteByte(',')
-			}
-			encoded, _ := json.Marshal(key)
-			output.Write(encoded)
-			output.WriteByte(':')
-			if err := writeCanonical(output, typed[key]); err != nil {
-				return err
-			}
-		}
-		output.WriteByte('}')
-	default:
-		encoded, err := json.Marshal(typed)
-		if err != nil {
-			return err
-		}
-		decoder := json.NewDecoder(bytes.NewReader(encoded))
-		decoder.UseNumber()
-		var normalized any
-		if err := decoder.Decode(&normalized); err != nil {
-			return err
-		}
-		return writeCanonical(output, normalized)
-	}
-	return nil
+	return canonicaljson.Marshal(payload)
 }
