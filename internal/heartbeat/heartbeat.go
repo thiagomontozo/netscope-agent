@@ -32,18 +32,20 @@ func Build(_ context.Context, agentID, agentVersion string, maximum int, capabil
 		spoolStatus = "UNAVAILABLE"
 	}
 	return protocol.Heartbeat{
-		ProtocolVersion:  protocol.Version,
-		AgentID:          agentID,
-		AgentVersion:     agentVersion,
-		Timestamp:        time.Now().UTC(),
-		Hostname:         hostname,
-		OS:               runtime.GOOS,
-		Architecture:     runtime.GOARCH,
-		Status:           status,
-		RunningJobs:      active,
-		AvailableSlots:   available,
-		CapabilitiesHash: capabilityReport.Hash(),
-		HealthSummary:    map[string]any{"identity": "VALID", "spool": spoolStatus, "spoolItems": items, "spoolBytes": spoolBytes, "capabilityManifest": "LOADED"},
-		LastJobResult:    running.LastResult(),
+		ProtocolVersion:         protocol.Version,
+		AgentID:                 agentID,
+		AgentVersion:            agentVersion,
+		ContractVersion:         protocol.ContractVersion,
+		CapabilitySchemaVersion: protocol.CapabilitySchemaVersion,
+		Timestamp:               time.Now().UTC(),
+		Hostname:                hostname,
+		OS:                      runtime.GOOS,
+		Architecture:            runtime.GOARCH,
+		Status:                  status,
+		RunningJobs:             active,
+		AvailableSlots:          available,
+		CapabilitiesHash:        capabilityReport.Hash(),
+		HealthSummary:           map[string]any{"identity": "VALID", "spool": spoolStatus, "spoolItems": items, "spoolBytes": spoolBytes, "capabilityManifest": "LOADED"},
+		LastJobResult:           running.LastResult(),
 	}
 }

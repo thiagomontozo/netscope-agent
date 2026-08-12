@@ -9,6 +9,8 @@ import (
 )
 
 const Version = "1.0"
+const ContractVersion = "1.0"
+const CapabilitySchemaVersion = "1.0"
 
 type RiskClass string
 
@@ -66,8 +68,12 @@ type EnrollmentResponse struct {
 }
 
 type ControlPlaneIdentity struct {
-	CACertificatePEM    string `json:"caCertificatePem"`
-	JobSigningPublicKey string `json:"jobSigningPublicKey,omitempty"`
+	CACertificatePEM         string    `json:"caCertificatePem"`
+	JobSigningKeyID          string    `json:"jobSigningKeyId,omitempty"`
+	JobSigningAlgorithm      string    `json:"jobSigningAlgorithm,omitempty"`
+	JobSigningPublicKey      string    `json:"jobSigningPublicKey,omitempty"`
+	JobSigningKeyFingerprint string    `json:"jobSigningKeyFingerprint,omitempty"`
+	JobSigningKeyIssuedAt    time.Time `json:"jobSigningKeyIssuedAt,omitempty"`
 }
 
 type AgentCredential struct {
@@ -76,19 +82,21 @@ type AgentCredential struct {
 }
 
 type Heartbeat struct {
-	ProtocolVersion  string         `json:"protocolVersion"`
-	AgentID          string         `json:"agentId"`
-	AgentVersion     string         `json:"agentVersion"`
-	Timestamp        time.Time      `json:"timestamp"`
-	Hostname         string         `json:"hostname"`
-	OS               string         `json:"os"`
-	Architecture     string         `json:"architecture"`
-	Status           string         `json:"status"`
-	RunningJobs      int            `json:"runningJobs"`
-	AvailableSlots   int            `json:"availableSlots"`
-	CapabilitiesHash string         `json:"capabilitiesHash"`
-	HealthSummary    map[string]any `json:"healthSummary"`
-	LastJobResult    *LastJobResult `json:"lastJobResult,omitempty"`
+	ProtocolVersion         string         `json:"protocolVersion"`
+	AgentID                 string         `json:"agentId"`
+	AgentVersion            string         `json:"agentVersion"`
+	ContractVersion         string         `json:"contractVersion,omitempty"`
+	CapabilitySchemaVersion string         `json:"capabilitySchemaVersion,omitempty"`
+	Timestamp               time.Time      `json:"timestamp"`
+	Hostname                string         `json:"hostname"`
+	OS                      string         `json:"os"`
+	Architecture            string         `json:"architecture"`
+	Status                  string         `json:"status"`
+	RunningJobs             int            `json:"runningJobs"`
+	AvailableSlots          int            `json:"availableSlots"`
+	CapabilitiesHash        string         `json:"capabilitiesHash"`
+	HealthSummary           map[string]any `json:"healthSummary"`
+	LastJobResult           *LastJobResult `json:"lastJobResult,omitempty"`
 }
 
 type LastJobResult struct {
@@ -159,6 +167,7 @@ type JobEnvelope struct {
 	ExpiresAt                time.Time       `json:"expiresAt"`
 	TimeoutSeconds           int             `json:"timeoutSeconds"`
 	Nonce                    string          `json:"nonce"`
+	SigningKeyID             string          `json:"signingKeyId,omitempty"`
 	SignatureAlgorithm       string          `json:"signatureAlgorithm,omitempty"`
 	Signature                string          `json:"signature,omitempty"`
 }
@@ -257,6 +266,29 @@ type EvidenceRequest struct {
 	JobID           string           `json:"jobId"`
 	AgentID         string           `json:"agentId"`
 	Evidence        EvidenceManifest `json:"evidence"`
+}
+
+type ArtifactManifest struct {
+	ProtocolVersion   string     `json:"protocolVersion"`
+	ArtifactID        string     `json:"artifactId"`
+	OrganizationID    string     `json:"organizationId"`
+	JobID             *string    `json:"jobId,omitempty"`
+	Type              string     `json:"type"`
+	Direction         string     `json:"direction"`
+	ContentType       string     `json:"contentType"`
+	OriginalName      string     `json:"originalName,omitempty"`
+	SizeBytes         int64      `json:"sizeBytes"`
+	SHA256            string     `json:"sha256"`
+	Status            string     `json:"status"`
+	CreatedAt         time.Time  `json:"createdAt"`
+	ExpiresAt         *time.Time `json:"expiresAt,omitempty"`
+	UploadedByAgentID *string    `json:"uploadedByAgentId,omitempty"`
+}
+
+type ArtifactAuthorization struct {
+	Token            string `json:"token"`
+	Purpose          string `json:"purpose"`
+	ExpiresInSeconds int    `json:"expiresInSeconds"`
 }
 
 type ErrorEnvelope struct {

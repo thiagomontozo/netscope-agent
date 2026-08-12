@@ -1,6 +1,7 @@
 package security
 
 import (
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"regexp"
@@ -36,6 +37,8 @@ type JobVerifier struct {
 	AgentID        string
 	OrganizationID string
 	Now            func() time.Time
+	TrustedKeys    map[string]ed25519.PublicKey
+	RequireSigned  bool
 	mu             sync.Mutex
 	seen           map[string]time.Time
 }
@@ -80,8 +83,12 @@ func (v *JobVerifier) Verify(job protocol.JobEnvelope) error {
 	if err := ValidateTarget(job.Target); err != nil {
 		return fail(protocol.FailureTargetRejected, err.Error())
 	}
-	if job.Signature != "" || job.SignatureAlgorithm != "" {
-		return fail(protocol.FailureSignature, "signed job envelopes are not active in Control Plane protocol v1")
+	if job.Signature != "" || job.SignatureAlgorithm != "" || job.SigningKeyID != "" {
+		if err := VerifyJobSignature(job, v.TrustedKeys); err != nil {
+			return fail(protocol.FailureSignature, err.Error())
+		}
+	} else if v.RequireSigned {
+		return fail(protocol.FailureSignature, "unsigned jobs are prohibited by local trust policy")
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()

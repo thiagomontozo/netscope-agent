@@ -1,0 +1,3 @@
+4ce69691d9fabe96999224a540c9318c6b9f2839c89bd69dddf317fb3cb54e67  test-vectors/artifact-sha256.json
+8c2dc09201af6f530a5d747299440f2c65de0a437e43f57aad950fa767832bdd  test-vectors/canonical-job-payload.json
+126e3a4b98b0df4017ff425fc15556be1683e3ad99604ea95c6f6f0ffb37f1f5  test-vectors/ed25519-job-signing.json
