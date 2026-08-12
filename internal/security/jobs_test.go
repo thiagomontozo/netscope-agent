@@ -34,13 +34,18 @@ func TestJobVerifierSecurityInvariants(t *testing.T) {
 	if err := verifier.Verify(signed); err != nil {
 		t.Fatalf("valid signed job rejected: %v", err)
 	}
-	if err := verifier.Verify(signed); err == nil {
-		t.Fatal("replayed nonce was accepted")
+	if err := verifier.Verify(signed); FailureCode(err) != protocol.FailureReplay {
+		t.Fatalf("replayed nonce failure=%v", err)
 	}
 	tampered := signed
 	tampered.Target.Value = "changed.test.invalid"
 	if err := newVerifier(base.AgentID).Verify(tampered); FailureCode(err) != protocol.FailureSignature {
 		t.Fatalf("tamper failure=%v", err)
+	}
+	unknownKey := signed
+	unknownKey.SigningKeyID = "unknown-test-key"
+	if err := newVerifier(base.AgentID).Verify(unknownKey); FailureCode(err) != protocol.FailureSignature {
+		t.Fatalf("unknown signing key failure=%v", err)
 	}
 	if err := newVerifier("99999999-9999-4999-8999-999999999999").Verify(signed); FailureCode(err) != protocol.FailureInvalidJob {
 		t.Fatalf("wrong agent failure=%v", err)

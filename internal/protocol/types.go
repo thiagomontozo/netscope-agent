@@ -173,6 +173,7 @@ type JobEnvelope struct {
 }
 
 type Observation struct {
+	EvidenceID      *string    `json:"evidenceId,omitempty"`
 	AssetID         *string    `json:"assetId,omitempty"`
 	Category        string     `json:"category"`
 	Status          Status     `json:"status"`
@@ -196,6 +197,7 @@ type Metric struct {
 
 type EvidenceManifest struct {
 	EvidenceID     string          `json:"evidenceId"`
+	ArtifactID     *string         `json:"artifactId,omitempty"`
 	Source         string          `json:"source"`
 	ContentType    string          `json:"contentType"`
 	Summary        string          `json:"summary"`
@@ -240,6 +242,7 @@ const (
 	FailureCancelled           FailureCode = "CANCELLED"
 	FailureProtocol            FailureCode = "PROTOCOL_INCOMPATIBLE"
 	FailureSignature           FailureCode = "SIGNATURE_INVALID"
+	FailureReplay              FailureCode = "REPLAY_REJECTED"
 	FailureInternal            FailureCode = "INTERNAL_ERROR"
 )
 

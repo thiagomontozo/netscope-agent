@@ -10,8 +10,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 )
+
+var rotationIDPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
 type RotationResponse struct {
 	CertificateID  string    `json:"certificateId"`
@@ -25,7 +28,7 @@ type RotationResponse struct {
 // fsynced staging directory. ActivateRotation performs atomic renames while
 // keeping a bounded rollback copy until the Control Plane confirms activation.
 func StageRotation(dataDir string, pending Pending, response RotationResponse) (string, error) {
-	if response.CertificateID == "" || response.CertificatePEM == "" {
+	if !rotationIDPattern.MatchString(response.CertificateID) || response.CertificatePEM == "" {
 		return "", errors.New("rotation response is incomplete")
 	}
 	pair, err := tls.X509KeyPair([]byte(response.CertificatePEM), pending.PrivateKeyPEM)
@@ -63,6 +66,9 @@ func StageRotation(dataDir string, pending Pending, response RotationResponse) (
 	}{{privateFile, pending.PrivateKeyPEM}, {certFile, []byte(response.CertificatePEM)}, {metadataFile, metadata}}
 	for _, preserved := range []string{trustFile, signingFile} {
 		data, readErr := os.ReadFile(Path(dataDir, preserved))
+		if preserved == signingFile && errors.Is(readErr, os.ErrNotExist) {
+			continue
+		}
 		if readErr != nil {
 			_ = os.RemoveAll(stage)
 			return "", readErr

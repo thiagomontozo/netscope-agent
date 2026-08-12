@@ -90,7 +90,8 @@ func (t Transfer) Upload(ctx context.Context, transferURL, token, path, expected
 		return err
 	}
 	defer file.Close()
-	request, err := http.NewRequestWithContext(ctx, http.MethodPut, transferURL, io.LimitReader(file, t.MaxUploadBytes+1))
+	hash := sha256.New()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPut, transferURL, io.LimitReader(io.TeeReader(file, hash), t.MaxUploadBytes+1))
 	if err != nil {
 		return err
 	}
@@ -104,6 +105,9 @@ func (t Transfer) Upload(ctx context.Context, transferURL, token, path, expected
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("artifact upload failed with status %d", response.StatusCode)
+	}
+	if !hmac.Equal([]byte(hex.EncodeToString(hash.Sum(nil))), []byte(strings.ToLower(expectedSHA256))) {
+		return ErrChecksumMismatch
 	}
 	return nil
 }

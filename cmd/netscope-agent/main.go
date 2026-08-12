@@ -37,7 +37,7 @@ import (
 	"github.com/thiagomontozo/netscope-agent/internal/spool"
 )
 
-const version = "0.2.0-experimental"
+const version = "0.2.1-experimental"
 
 func main() {
 	cfg, err := config.Load()
@@ -112,42 +112,72 @@ func main() {
 		}
 		stage, stageErr := identity.StageRotation(cfg.DataDir, pending, rotation)
 		if stageErr != nil {
-			logger.Error("certificate rotation validation failed", "agentId", id.AgentID, "error", stageErr)
-			os.Exit(1)
+			rollbackCtx, cancelRollback := context.WithTimeout(ctx, cfg.RequestTimeout)
+			_ = api.RollbackIdentityRotation(rollbackCtx, rotation.CertificateID)
+			cancelRollback()
+			logger.Warn("certificate rotation validation failed; pending certificate revoked", "agentId", id.AgentID, "error", stageErr)
+			stage = ""
 		}
-		if activateErr := identity.ActivateRotation(cfg.DataDir, stage); activateErr != nil {
-			logger.Error("certificate rotation activation failed", "agentId", id.AgentID, "error", activateErr)
-			os.Exit(1)
+		if stage != "" {
+			if activateErr := identity.ActivateRotation(cfg.DataDir, stage); activateErr != nil {
+				rollbackCtx, cancelRollback := context.WithTimeout(ctx, cfg.RequestTimeout)
+				_ = api.RollbackIdentityRotation(rollbackCtx, rotation.CertificateID)
+				cancelRollback()
+				_ = os.RemoveAll(stage)
+				logger.Warn("certificate rotation activation failed; prior identity preserved", "agentId", id.AgentID, "error", activateErr)
+				stage = ""
+			}
 		}
-		confirmCtx, cancelConfirm := context.WithTimeout(ctx, cfg.RequestTimeout)
-		confirmErr := api.ConfirmIdentityRotation(confirmCtx, rotation.CertificateID)
-		cancelConfirm()
-		if confirmErr != nil {
+		var rotatedIdentity *identity.Identity
+		var loadErr error
+		if stage != "" {
+			rotatedIdentity, loadErr = identity.Load(cfg.DataDir)
+		}
+		if loadErr != nil {
 			_ = identity.RollbackRotation(cfg.DataDir)
-			logger.Error("certificate rotation confirmation failed; local identity rolled back", "agentId", id.AgentID, "error", confirmErr)
-			os.Exit(1)
+			rollbackCtx, cancelRollback := context.WithTimeout(ctx, cfg.RequestTimeout)
+			_ = api.RollbackIdentityRotation(rollbackCtx, rotation.CertificateID)
+			cancelRollback()
+			logger.Warn("certificate rotation rolled back after local validation failed", "agentId", id.AgentID, "error", loadErr)
+			rotatedIdentity = nil
 		}
-		id, err = identity.Load(cfg.DataDir)
-		if err != nil {
-			logger.Error("rotated identity could not be loaded", "error", err)
-			os.Exit(1)
+		var rotatedAPI *client.Client
+		if rotatedIdentity != nil {
+			rotatedHTTP, clientErr := newHTTPClient(cfg, rotatedIdentity)
+			if clientErr == nil {
+				rotatedAPI, clientErr = client.New(cfg.ControlPlaneURL, rotatedHTTP, version)
+			}
+			if clientErr != nil {
+				_ = identity.RollbackRotation(cfg.DataDir)
+				rollbackCtx, cancelRollback := context.WithTimeout(ctx, cfg.RequestTimeout)
+				_ = api.RollbackIdentityRotation(rollbackCtx, rotation.CertificateID)
+				cancelRollback()
+				logger.Warn("certificate rotation rolled back after new mTLS client validation failed", "agentId", id.AgentID, "error", clientErr)
+				rotatedIdentity = nil
+			}
 		}
-		httpClient, err = newHTTPClient(cfg, id)
-		if err != nil {
-			logger.Error("rotated mTLS configuration failed", "error", err)
-			os.Exit(1)
+		if rotatedIdentity != nil {
+			confirmCtx, cancelConfirm := context.WithTimeout(ctx, cfg.RequestTimeout)
+			confirmErr := rotatedAPI.ConfirmIdentityRotation(confirmCtx, rotation.CertificateID)
+			cancelConfirm()
+			if confirmErr != nil {
+				rotatedAPI.CloseIdleConnections()
+				_ = identity.RollbackRotation(cfg.DataDir)
+				rollbackCtx, cancelRollback := context.WithTimeout(ctx, cfg.RequestTimeout)
+				_ = api.RollbackIdentityRotation(rollbackCtx, rotation.CertificateID)
+				cancelRollback()
+				logger.Warn("certificate rotation confirmation failed; prior identity preserved", "agentId", id.AgentID, "error", confirmErr)
+			} else {
+				api.CloseIdleConnections()
+				api = rotatedAPI
+				id = rotatedIdentity
+				defer api.CloseIdleConnections()
+				if err := identity.CommitRotation(cfg.DataDir); err != nil {
+					logger.Warn("certificate rotation rollback cleanup failed", "agentId", id.AgentID, "error", err)
+				}
+				logger.Info("agent certificate rotated", "agentId", id.AgentID, "expiresAt", id.CertificateExpiry)
+			}
 		}
-		api.CloseIdleConnections()
-		api, err = client.New(cfg.ControlPlaneURL, httpClient, version)
-		if err != nil {
-			logger.Error("rotated client initialization failed", "error", err)
-			os.Exit(1)
-		}
-		defer api.CloseIdleConnections()
-		if err := identity.CommitRotation(cfg.DataDir); err != nil {
-			logger.Warn("certificate rotation rollback cleanup failed", "agentId", id.AgentID, "error", err)
-		}
-		logger.Info("agent certificate rotated", "agentId", id.AgentID, "expiresAt", id.CertificateExpiry)
 	}
 
 	capabilityReport.Manifest.AgentID = id.AgentID

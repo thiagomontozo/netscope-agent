@@ -101,7 +101,7 @@ func (v *JobVerifier) Verify(job protocol.JobEnvelope) error {
 		}
 	}
 	if _, exists := v.seen[job.Nonce]; exists {
-		return fail(protocol.FailureInvalidJob, "job nonce was already accepted")
+		return fail(protocol.FailureReplay, "job nonce was already accepted")
 	}
 	if len(v.seen) >= 4096 {
 		return fail(protocol.FailureInternal, "job nonce cache reached its safety limit")

@@ -174,6 +174,10 @@ func (c *Client) ConfirmIdentityRotation(ctx context.Context, certificateID stri
 	return c.doJSON(ctx, http.MethodPost, "/agent/v1/identity/rotate/confirm", map[string]string{"certificateId": certificateID}, nil)
 }
 
+func (c *Client) RollbackIdentityRotation(ctx context.Context, certificateID string) error {
+	return c.doJSON(ctx, http.MethodPost, "/agent/v1/identity/rotate/rollback", map[string]string{"certificateId": certificateID}, nil)
+}
+
 func (c *Client) AuthorizeArtifact(ctx context.Context, artifactID, jobID, purpose string) (protocol.ArtifactAuthorization, error) {
 	var envelope protocol.DataEnvelope[protocol.ArtifactAuthorization]
 	err := c.doJSON(ctx, http.MethodPost, "/agent/v1/artifacts/"+url.PathEscape(artifactID)+"/authorize", map[string]string{"jobId": jobID, "purpose": purpose}, &envelope)

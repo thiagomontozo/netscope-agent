@@ -231,6 +231,10 @@ func (e *Executor) normalize(job protocol.JobEnvelope, result jobs.ModuleResult)
 	if err != nil {
 		return protocol.JobResult{}, err
 	}
+	for index := range observations {
+		evidenceID := manifest.EvidenceID
+		observations[index].EvidenceID = &evidenceID
+	}
 	warnings := result.Warnings
 	if warnings == nil {
 		warnings = []string{}
