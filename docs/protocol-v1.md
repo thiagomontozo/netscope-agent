@@ -1,5 +1,10 @@
 # NetScope Agent Protocol v1
 
+The Agent implements Protocol and contract `1.0` with explicit major-version
+compatibility. Its offline validation snapshot is exported from the canonical
+Control Plane contract. Signing remains an optional 1.0 wire extension that the
+default Agent security policy requires.
+
 Protocol version: `1.0`. Agent version: `0.2.0-experimental`.
 
 The normative source is the Control Plane directory `contracts/agent/v1`.

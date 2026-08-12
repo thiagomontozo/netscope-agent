@@ -1,5 +1,9 @@
 # Enrollment
 
+The authenticated response may carry named Ed25519 public trust metadata. The
+Agent validates its fingerprint before atomically persisting it beside the mTLS
+identity; no Control Plane signing private key is transmitted.
+
 Protocol v1 enrollment uses `POST /agent/v1/enroll` with a direct JSON body containing `protocolVersion`, `enrollmentToken`, `agentName`, hostname, OS, architecture, agent version, a PKCS#10 CSR, initial capability IDs and optional network zone.
 
 The Agent creates an ECDSA P-256 key locally and sends only the CSR. The Control Plane atomically consumes the short-lived token, issues a 90-day client-auth certificate and returns:

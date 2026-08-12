@@ -1,5 +1,14 @@
 # NetScope Agent
 
+> Current status: **Experimental**. The Agent is not a remote shell.
+
+Jobs originate from the Control Plane only after Authorized Scope and Scan
+Guard checks. Protocol 1.x envelopes are Ed25519 signed, bind the intended
+Agent/target/risk/expiry/nonce, and contain validated module parameters rather
+than commands. Artifacts use scoped authorization and streaming SHA-256 checks.
+Private certificate and rotation keys remain local, and communication is
+outbound initiated.
+
 Secure cross-platform network sensor and execution agent for NetScope, written in Go.
 
 > Current status: **Experimental**. Agent version `0.2.0-experimental`; NetScope Agent Protocol `1.0`.

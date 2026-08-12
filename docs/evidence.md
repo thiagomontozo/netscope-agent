@@ -1,5 +1,9 @@
 # Evidence
 
+Large bytes use the separate artifact transfer path, not the small result
+spool. Evidence manifests can reference an artifact whose final size and
+SHA-256 were independently verified by both endpoints.
+
 The Agent produces the exact `EvidenceManifest` fields: UUID, source, content type, summary, structured object, SHA-256, byte size and allowed artifact kind. Evidence is generated after bounded module execution and before result delivery.
 
 Structured evidence uses `application/json`. The checksum covers the exact structured bytes stored in the manifest. Result spooling preserves the evidence ID and payload, which is required for idempotent retry.

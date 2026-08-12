@@ -1,5 +1,9 @@
 # Job lifecycle
 
+Signature, protocol, identity, target, risk, expiry and replay validation occur
+before module lookup or execution. Cancellation and timeout report terminal
+`CANCELLED`/`TIMED_OUT` failures and cannot later become `SUCCEEDED`.
+
 ```text
 heartbeat -> poll -> validate -> reserve slot -> start acknowledgement
           -> cancellation check -> bounded execution -> result or failure

@@ -1,5 +1,11 @@
 # Security
 
+Trust is layered: HTTPS, mTLS identity, server-side revocation, Ed25519
+named-key verification, expiry/nonce replay checks, compiled modules, validated
+targets, bounded execution/output and scoped artifact integrity. Signed-job
+policy has no insecure fallback; rotation uses private staged fsync and atomic
+rename.
+
 ## Invariants
 
 - No remote shell, administrative listener, arbitrary command, script upload, SSH proxy, dynamic plugin or remote updater exists.
