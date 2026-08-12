@@ -14,11 +14,11 @@ import (
 
 type Module struct {
 	ID     string
-	Runner nprocess.Runner
+	Runner nprocess.ProcessRunner
 }
 
-func NewDiscovery(r nprocess.Runner) Module { return Module{ID: "nmap.discovery", Runner: r} }
-func NewServices(r nprocess.Runner) Module  { return Module{ID: "nmap.services", Runner: r} }
+func NewDiscovery(r nprocess.ProcessRunner) Module { return Module{ID: "nmap.discovery", Runner: r} }
+func NewServices(r nprocess.ProcessRunner) Module  { return Module{ID: "nmap.services", Runner: r} }
 func (m Module) Descriptor() modules.Descriptor {
 	return modules.Descriptor{ID: m.ID, Version: "0.1.0", RiskClass: jobs.RiskControlledActive, Implementation: "external-tool", RequiredTool: "nmap", RequiredCapability: "nmap", Platforms: []string{"linux", "windows", "darwin"}, ConcurrencyLimit: 1}
 }

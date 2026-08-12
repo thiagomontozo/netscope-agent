@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/thiagomontozo/netscope-agent/internal/identity"
 	"github.com/thiagomontozo/netscope-agent/internal/protocol"
 )
 
@@ -160,6 +161,28 @@ func (c *Client) ReportEvidence(ctx context.Context, evidence protocol.EvidenceR
 func (c *Client) Cancellation(ctx context.Context, jobID string) (protocol.JobCancellation, error) {
 	var envelope protocol.DataEnvelope[protocol.JobCancellation]
 	err := c.doJSON(ctx, http.MethodGet, "/agent/v1/jobs/"+url.PathEscape(jobID)+"/cancellation", nil, &envelope)
+	return envelope.Data, err
+}
+
+func (c *Client) RotateIdentity(ctx context.Context, csrPEM string) (identity.RotationResponse, error) {
+	var envelope protocol.DataEnvelope[identity.RotationResponse]
+	err := c.doJSON(ctx, http.MethodPost, "/agent/v1/identity/rotate", map[string]string{"csrPem": csrPEM}, &envelope)
+	return envelope.Data, err
+}
+
+func (c *Client) ConfirmIdentityRotation(ctx context.Context, certificateID string) error {
+	return c.doJSON(ctx, http.MethodPost, "/agent/v1/identity/rotate/confirm", map[string]string{"certificateId": certificateID}, nil)
+}
+
+func (c *Client) AuthorizeArtifact(ctx context.Context, artifactID, jobID, purpose string) (protocol.ArtifactAuthorization, error) {
+	var envelope protocol.DataEnvelope[protocol.ArtifactAuthorization]
+	err := c.doJSON(ctx, http.MethodPost, "/agent/v1/artifacts/"+url.PathEscape(artifactID)+"/authorize", map[string]string{"jobId": jobID, "purpose": purpose}, &envelope)
+	return envelope.Data, err
+}
+
+func (c *Client) CreateArtifact(ctx context.Context, manifest protocol.ArtifactManifest) (protocol.ArtifactManifest, error) {
+	var envelope protocol.DataEnvelope[protocol.ArtifactManifest]
+	err := c.doJSON(ctx, http.MethodPost, "/agent/v1/artifacts", manifest, &envelope)
 	return envelope.Data, err
 }
 

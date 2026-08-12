@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-type Module struct{ Runner nprocess.Runner }
+type Module struct{ Runner nprocess.ProcessRunner }
 type params struct {
 	MaxHops   int `json:"maxHops"`
 	TimeoutMS int `json:"timeoutMs"`
@@ -28,7 +28,7 @@ type hop struct {
 	Timeout   bool     `json:"timeout"`
 }
 
-func New(r nprocess.Runner) Module { return Module{Runner: r} }
+func New(r nprocess.ProcessRunner) Module { return Module{Runner: r} }
 func (Module) Descriptor() modules.Descriptor {
 	return modules.Descriptor{ID: "network.route", Version: "0.1.0", RiskClass: jobs.RiskSafeActive, Implementation: "external-tool", RequiredTool: routeBinary(), RequiredCapability: "route", Platforms: []string{"linux", "windows", "darwin"}, ConcurrencyLimit: 2}
 }

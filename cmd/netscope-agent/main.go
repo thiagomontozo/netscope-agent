@@ -97,6 +97,58 @@ func main() {
 		os.Exit(1)
 	}
 	defer api.CloseIdleConnections()
+	if time.Until(id.CertificateExpiry) <= 14*24*time.Hour {
+		pending, generateErr := identity.Generate(cfg.AgentName, "")
+		if generateErr != nil {
+			logger.Error("certificate rotation key generation failed", "error", generateErr)
+			os.Exit(1)
+		}
+		rotationCtx, cancelRotation := context.WithTimeout(ctx, cfg.RequestTimeout)
+		rotation, rotationErr := api.RotateIdentity(rotationCtx, pending.CSRPEM)
+		cancelRotation()
+		if rotationErr != nil {
+			logger.Error("certificate rotation request failed", "agentId", id.AgentID, "error", rotationErr)
+			os.Exit(1)
+		}
+		stage, stageErr := identity.StageRotation(cfg.DataDir, pending, rotation)
+		if stageErr != nil {
+			logger.Error("certificate rotation validation failed", "agentId", id.AgentID, "error", stageErr)
+			os.Exit(1)
+		}
+		if activateErr := identity.ActivateRotation(cfg.DataDir, stage); activateErr != nil {
+			logger.Error("certificate rotation activation failed", "agentId", id.AgentID, "error", activateErr)
+			os.Exit(1)
+		}
+		confirmCtx, cancelConfirm := context.WithTimeout(ctx, cfg.RequestTimeout)
+		confirmErr := api.ConfirmIdentityRotation(confirmCtx, rotation.CertificateID)
+		cancelConfirm()
+		if confirmErr != nil {
+			_ = identity.RollbackRotation(cfg.DataDir)
+			logger.Error("certificate rotation confirmation failed; local identity rolled back", "agentId", id.AgentID, "error", confirmErr)
+			os.Exit(1)
+		}
+		id, err = identity.Load(cfg.DataDir)
+		if err != nil {
+			logger.Error("rotated identity could not be loaded", "error", err)
+			os.Exit(1)
+		}
+		httpClient, err = newHTTPClient(cfg, id)
+		if err != nil {
+			logger.Error("rotated mTLS configuration failed", "error", err)
+			os.Exit(1)
+		}
+		api.CloseIdleConnections()
+		api, err = client.New(cfg.ControlPlaneURL, httpClient, version)
+		if err != nil {
+			logger.Error("rotated client initialization failed", "error", err)
+			os.Exit(1)
+		}
+		defer api.CloseIdleConnections()
+		if err := identity.CommitRotation(cfg.DataDir); err != nil {
+			logger.Warn("certificate rotation rollback cleanup failed", "agentId", id.AgentID, "error", err)
+		}
+		logger.Info("agent certificate rotated", "agentId", id.AgentID, "expiresAt", id.CertificateExpiry)
+	}
 
 	capabilityReport.Manifest.AgentID = id.AgentID
 	capabilityCtx, cancelCapabilities := context.WithTimeout(ctx, cfg.RequestTimeout)
@@ -112,9 +164,14 @@ func main() {
 	}
 
 	queue := &spool.Queue{Dir: filepath.Join(cfg.DataDir, "spool"), MaxBytes: cfg.MaxSpoolBytes, MaxAge: cfg.MaxSpoolAge}
+	trustedSigningKeys, err := identity.TrustedSigningKeys(cfg.DataDir)
+	if err != nil {
+		logger.Error("job signing trust is invalid", "agentId", id.AgentID, "error", err)
+		os.Exit(1)
+	}
 	execution := executor.New(cfg.MaxConcurrentJobs)
 	execution.Registry = registry
-	execution.Verifier = &security.JobVerifier{AgentID: id.AgentID, OrganizationID: id.OrganizationID}
+	execution.Verifier = &security.JobVerifier{AgentID: id.AgentID, OrganizationID: id.OrganizationID, TrustedKeys: trustedSigningKeys, RequireSigned: cfg.RequireSignedJobs}
 	execution.Capabilities = capabilityReport
 	execution.ControlPlane = api
 	execution.Spool = queue

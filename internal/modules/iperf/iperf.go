@@ -9,13 +9,13 @@ import (
 	nprocess "github.com/thiagomontozo/netscope-agent/internal/process"
 )
 
-type Module struct{ Runner nprocess.Runner }
+type Module struct{ Runner nprocess.ProcessRunner }
 type params struct {
 	DestinationEndpointID string `json:"destinationEndpointId"`
 	DurationSeconds       int    `json:"durationSeconds"`
 }
 
-func New(r nprocess.Runner) Module { return Module{Runner: r} }
+func New(r nprocess.ProcessRunner) Module { return Module{Runner: r} }
 func (Module) Descriptor() modules.Descriptor {
 	return modules.Descriptor{ID: "performance.iperf3", Version: "0.1.0", RiskClass: jobs.RiskControlledActive, Implementation: "external-tool", RequiredTool: "iperf3", RequiredCapability: "iperf3", Platforms: []string{"linux", "windows", "darwin"}, ConcurrencyLimit: 1}
 }

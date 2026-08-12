@@ -2,7 +2,6 @@ package tshark
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 
 	"github.com/thiagomontozo/netscope-agent/internal/jobs"
@@ -11,7 +10,7 @@ import (
 )
 
 type Module struct {
-	Runner  nprocess.Runner
+	Runner  nprocess.ProcessRunner
 	DataDir string
 }
 type params struct {
@@ -19,7 +18,7 @@ type params struct {
 	Preset     string `json:"preset"`
 }
 
-func New(r nprocess.Runner, dataDir string) Module { return Module{Runner: r, DataDir: dataDir} }
+func New(r nprocess.ProcessRunner, dataDir string) Module { return Module{Runner: r, DataDir: dataDir} }
 func (Module) Descriptor() modules.Descriptor {
 	return modules.Descriptor{ID: "traffic.tshark", Version: "0.1.0", RiskClass: jobs.RiskPassive, Implementation: "external-tool", RequiredTool: "tshark", RequiredCapability: "tshark", Platforms: []string{"linux", "windows", "darwin"}, ConcurrencyLimit: 1}
 }

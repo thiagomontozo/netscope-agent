@@ -41,6 +41,7 @@ type Config struct {
 	MaxSpoolAge       time.Duration
 	ServerCAPath      string
 	NetworkZone       string
+	RequireSignedJobs bool
 }
 
 func Load() (Config, error) {
@@ -62,6 +63,7 @@ func Load() (Config, error) {
 		MaxSpoolAge:       duration("NETSCOPE_MAX_SPOOL_AGE", 24*time.Hour),
 		ServerCAPath:      firstNonEmpty(os.Getenv("NETSCOPE_SERVER_CA_CERT"), os.Getenv("NETSCOPE_CA_CERT")),
 		NetworkZone:       env("NETSCOPE_NETWORK_ZONE", "INTERNAL"),
+		RequireSignedJobs: boolean("NETSCOPE_REQUIRE_SIGNED_JOBS", true),
 	}
 	if err := c.Validate(); err != nil {
 		return Config{}, err
@@ -149,6 +151,18 @@ func bytes(key string, fallback int64) int64 {
 		return value
 	}
 	return fallback
+}
+
+func boolean(key string, fallback bool) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func firstNonEmpty(values ...string) string {

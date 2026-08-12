@@ -14,13 +14,13 @@ import (
 	"time"
 )
 
-type Module struct{ Runner nprocess.Runner }
+type Module struct{ Runner nprocess.ProcessRunner }
 type params struct {
 	Samples   int `json:"samples"`
 	TimeoutMS int `json:"timeoutMs"`
 }
 
-func New(r nprocess.Runner) Module { return Module{Runner: r} }
+func New(r nprocess.ProcessRunner) Module { return Module{Runner: r} }
 func (Module) Descriptor() modules.Descriptor {
 	return modules.Descriptor{ID: "network.ping", Version: "0.1.0", RiskClass: jobs.RiskSafeActive, Implementation: "external-tool", RequiredTool: "ping", RequiredCapability: "ping", Platforms: []string{"linux", "windows", "darwin"}, ConcurrencyLimit: 8}
 }

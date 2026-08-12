@@ -133,7 +133,7 @@ func (e *Executor) execute(parent context.Context, job protocol.JobEnvelope, mod
 	cancellation, cancellationErr := e.ControlPlane.Cancellation(checkCtx, job.JobID)
 	checkCancel()
 	if cancellationErr == nil && cancellation.CancellationRequested {
-		e.recordLast(job.JobID, "CANCELLED", time.Now().UTC())
+		e.reject(context.WithoutCancel(parent), job, protocol.FailureCancelled, "job cancellation was requested", false)
 		return
 	}
 
@@ -142,7 +142,7 @@ func (e *Executor) execute(parent context.Context, job protocol.JobEnvelope, mod
 	if runErr != nil {
 		select {
 		case <-cancelled:
-			e.recordLast(job.JobID, "CANCELLED", time.Now().UTC())
+			e.reject(context.WithoutCancel(parent), job, protocol.FailureCancelled, "job cancellation was requested", false)
 			return
 		default:
 		}
@@ -261,7 +261,14 @@ func (e *Executor) reject(ctx context.Context, job protocol.JobEnvelope, code pr
 	if err != nil {
 		_ = e.Spool.Enqueue("failure", failure)
 	}
-	e.recordLast(job.JobID, "FAILED", failure.OccurredAt)
+	status := "FAILED"
+	if code == protocol.FailureCancelled {
+		status = "CANCELLED"
+	}
+	if code == protocol.FailureTimeout {
+		status = "TIMED_OUT"
+	}
+	e.recordLast(job.JobID, status, failure.OccurredAt)
 	e.Logger.Warn("job rejected or failed", "agentId", job.AgentID, "jobId", job.JobID, "moduleId", job.ModuleID, "code", code)
 }
 

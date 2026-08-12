@@ -14,6 +14,10 @@ type Output struct {
 	Stdout, Stderr                   []byte
 	StdoutTruncated, StderrTruncated bool
 }
+type ProcessRunner interface {
+	Run(context.Context, string, ...string) (Output, error)
+	RunInDir(context.Context, string, string, ...string) (Output, error)
+}
 type Runner struct{ MaxStdout, MaxStderr int64 }
 
 type boundedBuffer struct {

@@ -2,6 +2,7 @@ package identity
 
 import (
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/thiagomontozo/netscope-agent/internal/protocol"
+	"github.com/thiagomontozo/netscope-agent/internal/security"
 )
 
 const (
@@ -29,12 +31,14 @@ const (
 )
 
 type Identity struct {
-	AgentID           string    `json:"agentId"`
-	OrganizationID    string    `json:"organizationId"`
-	ProtocolVersion   string    `json:"protocolVersion"`
-	CertificateExpiry time.Time `json:"certificateExpiry"`
-	Fingerprint       string    `json:"fingerprint"`
-	DataDir           string    `json:"-"`
+	AgentID               string    `json:"agentId"`
+	OrganizationID        string    `json:"organizationId"`
+	ProtocolVersion       string    `json:"protocolVersion"`
+	CertificateExpiry     time.Time `json:"certificateExpiry"`
+	Fingerprint           string    `json:"fingerprint"`
+	SigningKeyID          string    `json:"signingKeyId,omitempty"`
+	SigningKeyFingerprint string    `json:"signingKeyFingerprint,omitempty"`
+	DataDir               string    `json:"-"`
 }
 
 type Pending struct {
@@ -89,7 +93,7 @@ func SaveEnrollment(dataDir string, pending Pending, response protocol.Enrollmen
 		return nil, errors.New("enrollment certificate expiry is invalid")
 	}
 	digest := sha256.Sum256(certificate.Raw)
-	id := &Identity{AgentID: response.AgentID, OrganizationID: response.OrganizationID, ProtocolVersion: response.ProtocolVersion, CertificateExpiry: certificate.NotAfter, Fingerprint: hex.EncodeToString(digest[:]), DataDir: dataDir}
+	id := &Identity{AgentID: response.AgentID, OrganizationID: response.OrganizationID, ProtocolVersion: response.ProtocolVersion, CertificateExpiry: certificate.NotAfter, Fingerprint: hex.EncodeToString(digest[:]), SigningKeyID: response.ControlPlaneIdentity.JobSigningKeyID, SigningKeyFingerprint: response.ControlPlaneIdentity.JobSigningKeyFingerprint, DataDir: dataDir}
 	metadata, err := json.MarshalIndent(id, "", "  ")
 	if err != nil {
 		return nil, err
@@ -104,11 +108,19 @@ func SaveEnrollment(dataDir string, pending Pending, response protocol.Enrollmen
 		{trustFile, []byte(response.ControlPlaneIdentity.CACertificatePEM), 0o600},
 	}
 	if response.ControlPlaneIdentity.JobSigningPublicKey != "" {
+		trusted := security.TrustedSigningKey{KeyID: response.ControlPlaneIdentity.JobSigningKeyID, Algorithm: response.ControlPlaneIdentity.JobSigningAlgorithm, PublicKey: response.ControlPlaneIdentity.JobSigningPublicKey, Fingerprint: response.ControlPlaneIdentity.JobSigningKeyFingerprint, IssuedAt: response.ControlPlaneIdentity.JobSigningKeyIssuedAt}
+		if _, err := trusted.Decode(); err != nil {
+			return nil, fmt.Errorf("enrollment signing trust is invalid: %w", err)
+		}
+		trustJSON, err := json.MarshalIndent([]security.TrustedSigningKey{trusted}, "", "  ")
+		if err != nil {
+			return nil, err
+		}
 		files = append(files, struct {
 			name string
 			data []byte
 			mode os.FileMode
-		}{signingFile, []byte(response.ControlPlaneIdentity.JobSigningPublicKey + "\n"), 0o600})
+		}{signingFile, trustJSON, 0o600})
 	}
 	files = append(files, struct {
 		name string
@@ -194,6 +206,32 @@ func (i Identity) keyPair() (tls.Certificate, *x509.Certificate, error) {
 }
 
 func SigningKeyPath(dataDir string) string { return Path(dataDir, signingFile) }
+
+func TrustedSigningKeys(dataDir string) (map[string]ed25519.PublicKey, error) {
+	encoded, err := os.ReadFile(SigningKeyPath(dataDir))
+	if errors.Is(err, os.ErrNotExist) {
+		return map[string]ed25519.PublicKey{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var records []security.TrustedSigningKey
+	if err := json.Unmarshal(encoded, &records); err != nil {
+		return nil, errors.New("stored signing trust is invalid")
+	}
+	keys := make(map[string]ed25519.PublicKey, len(records))
+	for _, record := range records {
+		key, err := record.Decode()
+		if err != nil {
+			return nil, err
+		}
+		if _, duplicate := keys[record.KeyID]; duplicate {
+			return nil, errors.New("duplicate signing key ID")
+		}
+		keys[record.KeyID] = key
+	}
+	return keys, nil
+}
 
 func writeFile(path string, data []byte, mode os.FileMode) error {
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
