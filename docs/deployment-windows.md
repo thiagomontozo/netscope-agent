@@ -14,7 +14,7 @@ also clears the token from its process environment after successful enrollment.
 Windows filesystem ACL policies should protect the generated files below
 `%ProgramData%\NetScope Agent\identity`, especially `client-private-key.pem`.
 The identity also contains the client certificate, enrollment CA, fingerprint, and
-metadata. Certificate rotation is not yet exposed by the Control Plane, so expiry
+metadata. Certificate rotation is exposed by the Control Plane; expiry
 must be operationally monitored. `tracert`/`ping` availability is detected; other
 tools are optional and separately governed. The Agent does not install them. Review
 service recovery, outbound firewall allowlists, log collection, and upgrade rollback

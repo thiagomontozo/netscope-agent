@@ -19,4 +19,6 @@ The private key, certificate, CA and metadata are written to a staging directory
 
 All later `/agent/v1` calls present the client certificate. The Control Plane hashes its DER bytes and matches the fingerprint to an ONLINE, DEGRADED or OFFLINE non-expired agent. REVOKED and unknown identities are rejected.
 
-Certificate rotation is not exposed by the current Agent API. Recovery or re-enrollment must be an explicit administrative procedure.
+Certificate rotation uses `/agent/v1/identity/rotate`, confirmation with the new
+certificate and authenticated rollback with the previous certificate. Recovery
+outside that bounded transition remains an explicit administrative procedure.

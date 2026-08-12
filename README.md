@@ -11,7 +11,7 @@ outbound initiated.
 
 Secure cross-platform network sensor and execution agent for NetScope, written in Go.
 
-> Current status: **Experimental**. Agent version `0.2.0-experimental`; NetScope Agent Protocol `1.0`.
+> Current status: **Experimental**. Agent version `0.2.1-experimental`; NetScope Agent Protocol `1.0`.
 
 ## Overview
 
@@ -49,7 +49,11 @@ Identity files are staged and installed together under `data/identity` with rest
 
 ## Job signing status
 
-The Control Plane currently reserves Ed25519 envelope fields but does not activate signing or publish a signing key. The Agent therefore accepts only unsigned v1 envelopes. A partially populated or unexpectedly signed envelope is rejected with `SIGNATURE_INVALID`; this avoids pretending that an undefined canonicalization is secure. Signed-job support remains planned until both repositories define and activate the same canonical representation.
+The Agent defaults to signed jobs, selects the enrollment-distributed key by
+`signingKeyId`, canonicalizes protected fields with RFC 8785 JCS and verifies
+Ed25519 before module lookup. Finite decimal parameters remain JSON numbers.
+Unknown keys, altered decimals, invalid signatures and insecure downgrades fail
+closed.
 
 ## Capability reporting
 
@@ -86,7 +90,19 @@ Successful execution is normalized into the exact `JobResult` contract with `sta
 
 Each structured evidence item receives a UUID, SHA-256 checksum, byte size, `application/json` content type, source module and an allowed artifact kind. Evidence integrity metadata helps detect unintended changes; it is not a formal forensic chain of custody.
 
-Protocol v1 provides evidence metadata registration but no authorized artifact-content upload or download endpoint. The Agent does not invent a parallel transport. PCAP adapters remain unavailable until that contract exists.
+Protocol v1 provides job-scoped Artifact upload/download using short-lived
+tokens, bounded streaming and SHA-256 verification. Evidence can reference an
+available artifact and Observations can reference that Evidence. PCAP adapters
+remain governed by authorized Artifact delivery and do not receive general
+ObjectStorage access.
+
+## Protocol Reliability Hardening (v0.2.1)
+
+- RFC 8785 decimal-safe canonicalization and shared cryptographic vectors.
+- Signed decimal JobEnvelope and post-signature mutation regression.
+- Certificate B activation through B itself with rollback to certificate A.
+- Streaming upload/download integrity and partial-file cleanup.
+- Stable Evidence linkage for idempotent transactional ingestion.
 
 ## Result spool and retries
 
@@ -141,9 +157,12 @@ See `docs/deployment-linux.md` and `docs/deployment-windows.md`.
 
 ## Limitations
 
-- Job signing is planned but not active in the Control Plane.
-- Certificate rotation has no Control Plane Agent API endpoint yet; re-enrollment requires explicit administrative recovery.
-- Protocol v1 has evidence metadata registration but no artifact-content transfer contract, so PCAP adapters are not advertised.
+- No HSM integration or OCSP infrastructure is implemented.
+- The Control Plane supports one active signing key at a time.
+- Artifact transfer has no multipart/resumable protocol.
+- Control Plane rate limiting is process-local.
+- Automatic Agent binary updates are not implemented.
+- Production-scale load validation has not been performed.
 - The controlled iperf endpoint ID is not resolved into endpoint details by the current envelope, so iperf is not advertised.
 - Nonce replay state is memory-bounded and resets on process restart; server job state remains authoritative.
 - Runtime and interoperability validation remains pending in an authorized laboratory.

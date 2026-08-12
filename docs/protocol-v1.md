@@ -5,7 +5,7 @@ compatibility. Its offline validation snapshot is exported from the canonical
 Control Plane contract. Signing remains an optional 1.0 wire extension that the
 default Agent security policy requires.
 
-Protocol version: `1.0`. Agent version: `0.2.0-experimental`.
+Protocol version: `1.0`. Agent version: `0.2.1-experimental`.
 
 The normative source is the Control Plane directory `contracts/agent/v1`.
 Requests are direct JSON objects. Successful JSON responses are wrapped as
@@ -115,5 +115,5 @@ endpoint is state-machine guarded rather than receipt based.
 
 Ed25519 fields are reserved but inactive: the Control Plane does not sign envelopes
 or return a signing key. The Agent rejects unexpected signing fields. Certificate
-rotation, artifact-content transfer, and controlled endpoint resolution are not
+controlled endpoint resolution and multipart artifact transfer are not
 implemented by the current Control Plane API.

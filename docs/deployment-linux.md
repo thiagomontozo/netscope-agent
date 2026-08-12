@@ -14,7 +14,7 @@ client certificate, enrollment CA, fingerprint, and metadata are kept below
 `/var/lib/netscope-agent/identity`; the private key is created with mode `0600` and
 the identity directory with mode `0700`. Prefer journald for structured logs.
 
-Certificate rotation is not yet exposed by the Control Plane. Monitor the stored
+Certificate rotation is exposed by the Control Plane. Monitor the stored
 certificate expiry and perform an administratively approved re-enrollment before it
 expires. Do not delete a working identity as an automated recovery mechanism.
 

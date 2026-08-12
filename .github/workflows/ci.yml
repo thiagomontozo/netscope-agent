@@ -109,7 +109,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Run offline protocol and security tests
-        run: go test ./internal/protocol ./internal/security ./internal/artifacts ./internal/executor
+        run: go test ./internal/protocol ./internal/canonicaljson ./internal/security ./internal/identity ./internal/artifacts ./internal/executor
 
   container:
     name: Container build
