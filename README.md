@@ -1,5 +1,8 @@
 # NetScope Agent
 
+[![CI](https://github.com/thiagomontozo/netscope-agent/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/thiagomontozo/netscope-agent/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 > Current status: **Experimental**. The Agent is not a remote shell.
 
 Jobs originate from the Control Plane only after Authorized Scope and Scan
